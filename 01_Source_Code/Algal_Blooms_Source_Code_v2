@@ -111,8 +111,10 @@ var usfs = ee.FeatureCollection('projects/lcms-292214/assets/CONUS-Ancillary-Dat
 usfs = usfs.map(function(f){return f.set('constant',1)});
 var usfsMask = usfs.reduceToImage(['constant'], ee.Reducer.first()).focal_max(1000,'circle','meters');
 
-
 Map.addLayer(usfsMask,{},'USFS Lands',false);
+
+//Mask images to usfs
+images = images.map(function(img){return img.updateMask(usfsMask)});
 /// VISUALIZATION --------------------------------------------------------------------
 
 // Color palettes for bloom and bloom_thresh bands
@@ -138,7 +140,7 @@ images = images.map(function(img){
   return img;
 });
 
-images = images.map(function(img){return img.updateMask(water_mask).clip(usfs)}).select(['bloom1','bloom2']);
+images = images.map(function(img){return img.updateMask(water_mask)}).select(['bloom1','bloom2']);
 Map.addLayer(images,{},'images',false);
 var baselineImages = images.filter(ee.Filter.calendarRange(baselineStartYear,baselineEndYear,'year'));
 var analysisImages = images.filter(ee.Filter.calendarRange(analysisStartYear,analysisEndYear,'year'));
