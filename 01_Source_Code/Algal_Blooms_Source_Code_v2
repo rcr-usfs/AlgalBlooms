@@ -106,10 +106,6 @@ Map.addLayer(water_mask, {min:1, max:1, palette: "00F"}, 'Water Mask', false);
 
 // VISUALIZATION PARAMETERS -------------------------------------------------------------------------
 
-var truecolor = 1;  // show true color image as well
-var testThresh = false; // add a binary image classifying into "bloom"and "non-bloom
-var bloomThreshold = 0.02346; //threshold for classification fit based on other data
-var greenessThreshold = 1.6;
 
 /// FUNCTIONS --------------------------------------------------------------------------------------
 
