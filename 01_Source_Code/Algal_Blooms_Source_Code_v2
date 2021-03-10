@@ -131,9 +131,11 @@ images = images.map(function(img){
   return img;
 });
 
-images = images.map(function(img){return img.updateMask(water_mask)});
+images = images.map(function(img){return img.updateMask(water_mask)}).select(['bloom1','bloom2']);
 Map.addLayer(images,{},'images')
-var baselineImages = images.filter(ee.Filter.calendarRange(baselineStartYear,baselineEndYear,'year')).select(['bloom1','bloom2']);
+var baselineImages = images.filter(ee.Filter.calendarRange(baselineStartYear,baselineEndYear,'year'));
+var analysisImages = images.filter(ee.Filter.calendarRange(analysisStartYear,analysisEndYear,'year'));
+
 var baselineMean = baselineImages.mean();
 var baselineStdDev = baselineImages.reduce(ee.Reducer.stdDev());
 Map.addLayer(baselineMean,{},'Baseline Mean');;
