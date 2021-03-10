@@ -113,35 +113,6 @@ var greenessThreshold = 1.6;
 
 /// FUNCTIONS --------------------------------------------------------------------------------------
 
-// Implements the Automatic Clouud Cover Assessment, with some changes
-// http://landsathandbook.gsfc.nasa.gov/pdfs/ACCA_SPIE_paper.pdf
-var calcACCA = function(image) {
-  var f1 = image.select('B3').lt(0.08); // B3 below 0.08 is non-cloud
-  var f2 = image.normalizedDifference(['B2','B5']).gt(0.7); // (B2-B5)/(B2+B5) above 0.7 is non-cloud
-  var f3 = image.select('B6_VCID_1').gt(300); // B6 above this is non-cloud
-  var f4 = image.expression("( 1 - b('B5') ) * b('B6_VCID_1')").gt(225); // (1-B5)*B6 above this is ambiguous
-  var f5 = image.expression("b('B4') / b('B3')").gt(2.0); // B4/B3 above this is ambiguous
-  var f6 = image.expression("b('B4') / b('B2')").gt(2.0); // B4/B2 above this is ambiguous
-  var f7 = image.expression("b('B4') / b('B5')").lt(1.0); // B4/B5 below this is ambiguous 
-  
-  // Note: snow not expected in these summer scenes, so filter 8 not used
-  //var f8 = image.expression("b('b5') / b('b6')").gt(210); // B5/B6 above this is warm cloud (below is cold cloud)
-  
-  //ACCA Pass One
-  var nonclouds = f1.or(f2).or(f3);
-  var ambiguous = nonclouds.not().and(f4.or(f5).or(f6).or(f7));
-  var clouds = nonclouds.not().and(ambiguous.not());
-  
-  return image.addBands(clouds.rename('cloud'));
-};
-
-var maskClouds = function(image) {
-  // Get regions with clouds:
-  var yesCloud = calcACCA(image).select("cloud").eq(0);
-  // Remove clouds by making them 0:
-  return image.updateMask(yesCloud);
-};
-
 
 /// VISUALIZATION --------------------------------------------------------------------
 
