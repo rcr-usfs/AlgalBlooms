@@ -107,10 +107,12 @@ var water_mask = permWater.or(tempWater).selfMask();
 Map.addLayer(water_mask, {min:1, max:1, palette: "00F"}, 'Water Mask', false);
 
 var usfs = ee.FeatureCollection('projects/lcms-292214/assets/CONUS-Ancillary-Data/FS_Boundaries')
-            .filterBounds(args.studyArea);
+          .filterBounds(args.studyArea);
+usfs = usfs.map(function(f){return f.set('constant',1)});
+var usfsMask = usfs.reduceToImage(['constant'], ee.Reducer.first()).focal_max(1000,'circle','meters');
 
-usfs = usfs.map(function(f){return f.buffer(1000)});
-Map.addLayer(usfs,{},'USFS Boundaries',false);
+
+Map.addLayer(usfsMask,{},'USFS Lands',false);
 /// VISUALIZATION --------------------------------------------------------------------
 
 // Color palettes for bloom and bloom_thresh bands
