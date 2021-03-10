@@ -20,7 +20,7 @@ var getImagesLib = require('users/USFS_GTAC/modules:getImagesLib2.js');
 ///////////////////////////////////////////////////////////////////////////////
 // Define user parameters:
 
-args = {
+var args = {
           'studyArea':oregon,
           'startYear':2015,
           'endYear':2020,
@@ -78,7 +78,7 @@ args.preComputedSentinel2TDOMIRStdDev = preComputedTDOMStats.sentinel2.stdDev;
 //Get all images
 
 var images = getProcessedLandsatAndSentinel2Scenes(args);
-
+Map.addLayer(images.median(),getImagesLib.vizParamsFalse)
 // //Get water mask
 // var permWater = ee.Image("JRC/GSW1_1/GlobalSurfaceWater").select([0]).gte(90).unmask(0);
 // var tempWater =ee.ImageCollection("JRC/GSW1_1/MonthlyHistory")
