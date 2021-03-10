@@ -100,15 +100,6 @@ var tempWater =ee.ImageCollection("JRC/GSW1_1/MonthlyHistory")
 var water_mask = permWater.or(tempWater).selfMask();
 Map.addLayer(water_mask, {min:1, max:1, palette: "00F"}, 'Water Mask', false);
 
-/// Simplified Script for Landsat Water Quality
-// Produces a map of an algal bloom in Lake Erie on 2011/9/3
-// Created on 12/7/2015 by Jeff Ho
-
-// VISUALIZATION PARAMETERS -------------------------------------------------------------------------
-
-
-/// FUNCTIONS --------------------------------------------------------------------------------------
-
 
 /// VISUALIZATION --------------------------------------------------------------------
 
@@ -129,14 +120,10 @@ var cPal = ['000000', // black 0.014 and below
             '660000', // red 0.038
             ];
 
-// // Create land mask using MODIS annual land cover
-// // var land_mask = ee.Image('MCD12Q1/MCD12Q1_005_2001_01_01').select('Land_Cover_Type_1').neq(0);
-// // var water_mask = ee.Image('MCD12Q1/MCD12Q1_005_2001_01_01').select('Land_Cover_Type_1').eq(0).selfMask();
-// // Add layers to map for visualization
-
-// // Map.addLayer(land_mask.mask(land_mask), {min:0, max:1, palette: "000000"}, 'Land Mask');
-
-/// APPLY ALGORITHM TO IMAGE -----------------------------------------------------------------------
+images = images.map(function(img){
+  return HoCalcAlgorithm1(img)
+})
+// / APPLY ALGORITHM TO IMAGE -----------------------------------------------------------------------
 
 // // Filter to specific image
 // // var collection = ee.ImageCollection('LT5_L1T_TOA')
