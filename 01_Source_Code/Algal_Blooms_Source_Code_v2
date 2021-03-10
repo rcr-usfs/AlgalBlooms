@@ -14,6 +14,7 @@ var oregon =
           [-116.27016637117801, 46.43504904438413]]], null, false),
     test = 
     /* color: #d63000 */
+    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -88,14 +89,14 @@ args.preComputedSentinel2TDOMIRStdDev = preComputedTDOMStats.sentinel2.stdDev;
 ////////////////////////////////////////////////////////////////////////////////
 //Function Calls
 //Get all images
-
 var images = getImagesLib.getProcessedLandsatAndSentinel2Scenes(args);
-Map.addLayer(images.median(),getImagesLib.vizParamsFalse)
+Map.addLayer(images.median(),getImagesLib.vizParamsFalse);
+
 //Get water mask
 var permWater = ee.Image("JRC/GSW1_1/GlobalSurfaceWater").select([0]).gte(90).unmask(0);
 var tempWater =ee.ImageCollection("JRC/GSW1_1/MonthlyHistory")
-              .filter(ee.Filter.calendarRange(startYear,endYear,'year'))
-              .filter(ee.Filter.calendarRange(startJulian-30,endJulian+30)).mode().eq(2).unmask(0);
+              .filter(ee.Filter.calendarRange(args.startYear,args.endYear,'year'))
+              .filter(ee.Filter.calendarRange(args.startJulian-30,args.endJulian+30)).mode().eq(2).unmask(0);
 
 var water_mask = permWater.or(tempWater).selfMask();
 Map.addLayer(water_mask, {min:1, max:1, palette: "00F"}, 'Water Mask', false);
