@@ -36,7 +36,8 @@ var baselineStartYear = 2014;
 var baselineEndYear = 2019;
 var analysisStartYear = 2020;
 var analysisEndYear = 2020;
- 
+var zThresh = 1.5;
+
 var args = {
           'studyArea':test,
           'startYear':baselineStartYear,
@@ -142,9 +143,12 @@ Map.addLayer(baselineMean,{},'Baseline Mean',false);
 Map.addLayer(baselineStdDev,{},'Baseline StdDev',false);
 
 var z = analysisImages.map(function(img){return img.subtract(baselineMean).divide(baselineStdDev)}).mean();
-Map.addLayer(z.select([0]),{min:-2,max:2,palette:cPal},'Z 1');
-Map.addLayer(z.select([1]),{min:-2,max:2,palette:cPal},'Z 2');
+Map.addLayer(z.select([0]),{min:0,max:2,palette:cPal},'Z 1');
+Map.addLayer(z.select([1]),{min:0,max:2,palette:cPal},'Z 2');
 
+var bloomAnomaly = z.gte(zThresh).selfMask();
+Map.addLayer(bloomAnomaly.select([0]),{min:1,max:1,palette:'660000'},'Bloom 1');
+Map.addLayer(bloomAnomaly.select([1]),{min:1,max:1,palette:'660000'},'Bloom 2');
 // / APPLY ALGORITHM TO IMAGE -----------------------------------------------------------------------
 
 // // Filter to specific image
