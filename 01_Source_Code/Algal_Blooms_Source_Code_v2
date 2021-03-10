@@ -121,7 +121,9 @@ var cPal = ['000000', // black 0.014 and below
             ];
 
 images = images.map(function(img){
-  return HoCalcAlgorithm1(img)
+  img= getImagesLib.HoCalcAlgorithm1(img);
+  img= getImagesLib.HoCalcAlgorithm2(img);
+  return img
 })
 // / APPLY ALGORITHM TO IMAGE -----------------------------------------------------------------------
 
