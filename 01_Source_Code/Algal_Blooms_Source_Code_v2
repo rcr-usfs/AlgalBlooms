@@ -32,11 +32,15 @@ var getImagesLib = require('users/USFS_GTAC/modules:getImagesLib2.js');
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 // Define user parameters:
-
+var baselineStartYear = 2014;
+var baselineEndYear = 2019;
+var analysisStartYear = 2020;
+var analysisEndYear = 2020;
+ 
 var args = {
           'studyArea':test,
-          'startYear':2015,
-          'endYear':2020,
+          'startYear':baselineStartYear,
+          'endYear':analysisEndYear,
           'startJulian':175,
           'endJulian':175+16,
           'toaOrSR':'TOA',
