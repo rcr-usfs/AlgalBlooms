@@ -142,7 +142,8 @@ Map.addLayer(baselineMean,{},'Baseline Mean');
 Map.addLayer(baselineStdDev,{},'Baseline StdDev');
 
 var z = analysisImages.map(function(img){return img.subtract(baselineMean).divide(baselineStdDev)})
-Map.addLayer(z,{min:-1,max:1},'Z')
+Map.addLayer(z.select([0]),{min:-1,max:1,palette:cPal},'Z 1');
+Map.addLayer(z.select([1]),{min:-1,max:1,palette:cPal},'Z 2')
 
 // / APPLY ALGORITHM TO IMAGE -----------------------------------------------------------------------
 
