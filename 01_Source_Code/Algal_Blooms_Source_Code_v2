@@ -136,8 +136,7 @@ Map.addLayer(images,{},'images')
 var baselineImages = images.filter(ee.Filter.calendarRange(baselineStartYear,baselineEndYear,'year')).select(['bloom1','bloom2']);
 var baselineMean = baselineImages.mean();
 var baselineStdDev = baselineImages.reduce(ee.Reducer.stdDev());
-Map.addLayer(baselineMean,{},'Baseline Mean')
-Map.addLayer(baselineStdDev,{},'Baseline StdDev')
+Map.addLayer(baselineMean,{},'Baseline Mean');;
 // / APPLY ALGORITHM TO IMAGE -----------------------------------------------------------------------
 
 // // Filter to specific image
