@@ -94,7 +94,7 @@ args.preComputedSentinel2TDOMIRStdDev = preComputedTDOMStats.sentinel2.stdDev;
 //Function Calls
 //Get all images
 var images = getImagesLib.getProcessedLandsatAndSentinel2Scenes(args);
-Map.addLayer(images.median(),getImagesLib.vizParamsFalse);
+Map.addLayer(images.median(),getImagesLib.vizParamsFalse,'Median',false);
 
 //Get water mask
 var permWater = ee.Image("JRC/GSW1_1/GlobalSurfaceWater").select([0]).gte(90).unmask(0);
@@ -132,14 +132,14 @@ images = images.map(function(img){
 });
 
 images = images.map(function(img){return img.updateMask(water_mask)}).select(['bloom1','bloom2']);
-Map.addLayer(images,{},'images');
+Map.addLayer(images,{},'images',false);
 var baselineImages = images.filter(ee.Filter.calendarRange(baselineStartYear,baselineEndYear,'year'));
 var analysisImages = images.filter(ee.Filter.calendarRange(analysisStartYear,analysisEndYear,'year'));
 
 var baselineMean = baselineImages.mean();
 var baselineStdDev = baselineImages.reduce(ee.Reducer.stdDev());
-Map.addLayer(baselineMean,{},'Baseline Mean');
-Map.addLayer(baselineStdDev,{},'Baseline StdDev');
+Map.addLayer(baselineMean,{},'Baseline Mean',false);
+Map.addLayer(baselineStdDev,{},'Baseline StdDev',false);
 
 var z = analysisImages.map(function(img){return img.subtract(baselineMean).divide(baselineStdDev)});
 Map.addLayer(z.select([0]),{min:-1,max:1,palette:cPal},'Z 1');
