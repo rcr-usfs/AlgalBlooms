@@ -77,7 +77,7 @@ args.preComputedSentinel2TDOMIRStdDev = preComputedTDOMStats.sentinel2.stdDev;
 //Function Calls
 //Get all images
 
-var images = getProcessedLandsatAndSentinel2Scenes(args);
+var images = getImagesLib.getProcessedLandsatAndSentinel2Scenes(args);
 Map.addLayer(images.median(),getImagesLib.vizParamsFalse)
 // //Get water mask
 // var permWater = ee.Image("JRC/GSW1_1/GlobalSurfaceWater").select([0]).gte(90).unmask(0);
