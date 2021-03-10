@@ -145,6 +145,9 @@ Map.addLayer(images,{},'images',false);
 var baselineImages = images.filter(ee.Filter.calendarRange(baselineStartYear,baselineEndYear,'year'));
 var analysisImages = images.filter(ee.Filter.calendarRange(analysisStartYear,analysisEndYear,'year'));
 
+Map.addLayer(analysisImages.select([0]).mean(),{},'Mean Bloom 1');
+Map.addLayer(analysisImages.select([1]).mean(),{},'Mean Bloom 2');
+
 var baselineMean = baselineImages.mean();
 var baselineStdDev = baselineImages.reduce(ee.Reducer.stdDev());
 Map.addLayer(baselineMean,{},'Baseline Mean',false);
