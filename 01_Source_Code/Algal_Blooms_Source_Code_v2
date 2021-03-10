@@ -14,7 +14,6 @@ var oregon =
           [-116.27016637117801, 46.43504904438413]]], null, false),
     test = 
     /* color: #d63000 */
-    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
