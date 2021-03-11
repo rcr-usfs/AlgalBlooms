@@ -14,6 +14,7 @@ var oregon =
           [-116.27016637117801, 46.43504904438413]]], null, false),
     test = 
     /* color: #d63000 */
+    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -45,8 +46,8 @@ var args = {
           'studyArea':test,
           'startYear':baselineStartYear,
           'endYear':analysisEndYear,
-          'startJulian':225,
-          'endJulian':230+16,
+          'startJulian':220,
+          'endJulian':235+16,
           'toaOrSR':'TOA',
           'includeSLCOffL7':true,
           'defringeL5':true,
