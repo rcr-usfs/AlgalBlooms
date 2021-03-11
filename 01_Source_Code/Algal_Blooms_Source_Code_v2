@@ -14,7 +14,6 @@ var oregon =
           [-116.27016637117801, 46.43504904438413]]], null, false),
     test = 
     /* color: #d63000 */
-    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -113,7 +112,7 @@ Map.addLayer(water_mask, {min:1, max:1, palette: "00F"}, 'Water Mask', false);
 var usfs = ee.FeatureCollection('projects/lcms-292214/assets/CONUS-Ancillary-Data/FS_Boundaries')
           .filterBounds(args.studyArea);
 usfs = usfs.map(function(f){return f.set('constant',1)});
-var usfsMask = usfs.reduceToImage(['constant'], ee.Reducer.first()).focal_max(1000,'circle','meters');
+var usfsMask = usfs.reduceToImage(['constant'], ee.Reducer.first()).focal_max(2000,'circle','meters');
 
 Map.addLayer(usfsMask,{},'USFS Lands',false);
 
