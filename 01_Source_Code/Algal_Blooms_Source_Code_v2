@@ -37,9 +37,9 @@ var getImagesLib = require('users/USFS_GTAC/modules:getImagesLib2.js');
 ///////////////////////////////////////////////////////////////////////////////
 // Define user parameters:
 var baselineStartYear = 2014;
-var baselineEndYear = 2018;
-var analysisStartYear = 2019;
-var analysisEndYear = 2019;
+var baselineEndYear = 2017;
+var analysisStartYear = 2018;
+var analysisEndYear = 2018;
 var zThresh = 1.5;
 
 var args = {
