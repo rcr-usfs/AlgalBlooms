@@ -118,7 +118,7 @@ var usfsMask = usfs.reduceToImage(['constant'], ee.Reducer.first()).focal_max(20
 Map.addLayer(usfsMask,{},'USFS Lands',false);
 
 //Mask images to usfs
-images = images.map(function(img){return img.updateMask(usfsMask)});
+// images = images.map(function(img){return img.updateMask(usfsMask)});
 /// VISUALIZATION --------------------------------------------------------------------
 
 // Color palettes for bloom and bloom_thresh bands
