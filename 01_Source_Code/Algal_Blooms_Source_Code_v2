@@ -14,7 +14,6 @@ var oregon =
           [-116.27016637117801, 46.43504904438413]]], null, false),
     test = 
     /* color: #d63000 */
-    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -23,8 +22,8 @@ var oregon =
     ee.Geometry.Polygon(
         [[[-122.68319765108247, 44.94117042350872],
           [-122.68319765108247, 44.08135887779794],
-          [-121.64498964326997, 44.08135887779794],
-          [-121.64498964326997, 44.94117042350872]]], null, false);
+          [-121.25634828584809, 44.08135887779794],
+          [-121.25634828584809, 44.94117042350872]]], null, false);
 /***** End of imports. If edited, may not auto-convert in the playground. *****/
 
 //Module imports
