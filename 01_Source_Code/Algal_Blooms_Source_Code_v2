@@ -14,6 +14,7 @@ var oregon =
           [-116.27016637117801, 46.43504904438413]]], null, false),
     test = 
     /* color: #d63000 */
+    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -32,9 +33,9 @@ var getImagesLib = require('users/USFS_GTAC/modules:getImagesLib2.js');
 ///////////////////////////////////////////////////////////////////////////////
 // Define user parameters:
 var baselineStartYear = 2014;
-var baselineEndYear = 2019;
-var analysisStartYear = 2020;
-var analysisEndYear = 2020;
+var baselineEndYear = 2018;
+var analysisStartYear = 2019;
+var analysisEndYear = 2019;
 var zThresh = 1.5;
 
 var args = {
