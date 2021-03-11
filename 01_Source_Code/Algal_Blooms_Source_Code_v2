@@ -43,7 +43,7 @@ var analysisEndYear = 2018;
 var zThresh = 1.5;
 
 var args = {
-          'studyArea':test,
+          'studyArea':oregon,
           'startYear':baselineStartYear,
           'endYear':analysisEndYear,
           'startJulian':220,
