@@ -110,7 +110,7 @@ var getImagesLib = require('users/USFS_GTAC/modules:getImagesLib2.js');
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 // Define user parameters:
-var baselineStartYear = 2014;
+var baselineStartYear = 2017;
 var baselineEndYear = 2017;
 var analysisStartYear = 2018;
 var analysisEndYear = 2018;
@@ -218,29 +218,38 @@ images = images.map(function(img){
   return img;
 });
 
-images = images.map(function(img){return img.updateMask(water_mask)}).select(['NDSI','bloom1','bloom2']);
-Map.addLayer(images,{},'Full Time Series',false);
 var ndsiComposite = images.qualityMosaic('NDSI');
-Map.addLayer(ndsiComposite,getImagesLib.vizParamsFalse,'Max NDSI Composite',false);
+Map.addLayer(ndsiComposite,getImagesLib.vizParamsFalse,'Max NDSI Composite',true);
 
-var baselineImages = images.filter(ee.Filter.calendarRange(baselineStartYear,baselineEndYear,'year'));
-var analysisImages = images.filter(ee.Filter.calendarRange(analysisStartYear,analysisEndYear,'year'));
 
-// Map.addLayer(analysisImages.select([0]).mean(),{min:0,max:0.2,palette:cPal},'Mean Bloom 1');
-Map.addLayer(analysisImages.select([1]).mean(),{min:0.76,max:1,palette:cPal},'Mean Bloom 2');
+// images = images.map(function(img){return img.updateMask(water_mask)})
 
-var baselineMean = baselineImages.mean();
-var baselineStdDev = baselineImages.reduce(ee.Reducer.stdDev());
-Map.addLayer(baselineMean,{},'Baseline Mean',false);
-Map.addLayer(baselineStdDev,{},'Baseline StdDev',false);
 
-var z = analysisImages.map(function(img){return img.subtract(baselineMean).divide(baselineStdDev)}).mean();
-// Map.addLayer(z.select([0]),{min:0,max:2,palette:cPal},'Z 1');
-Map.addLayer(z.select([1]),{min:0,max:2,palette:cPal},'Z 2');
+// images = images.select(['NDSI','bloom1','bloom2']);
+// Map.addLayer(images,{},'Full Time Series',false);
+// var baselineImages = images.filter(ee.Filter.calendarRange(baselineStartYear,baselineEndYear,'year'));
+// var analysisImages = images.filter(ee.Filter.calendarRange(analysisStartYear,analysisEndYear,'year'));
 
-var bloomAnomaly = z.gte(zThresh).selfMask();
-// Map.addLayer(bloomAnomaly.select([0]),{min:1,max:1,palette:'660000'},'Bloom 1');
-Map.addLayer(bloomAnomaly.select([1]).focal_max(2),{min:1,max:1,palette:'ff0000'},'Bloom 2');
+// // Map.addLayer(analysisImages.select([0]).mean(),{min:0,max:0.2,palette:cPal},'Mean Bloom 1');
+// Map.addLayer(analysisImages.select([1]).mean(),{min:0.76,max:1,palette:cPal},'Mean Bloom 2');
+
+// var baselineMean = baselineImages.mean();
+// var baselineStdDev = baselineImages.reduce(ee.Reducer.stdDev());
+// Map.addLayer(baselineMean,{},'Baseline Mean',false);
+// Map.addLayer(baselineStdDev,{},'Baseline StdDev',false);
+
+// var z = analysisImages.map(function(img){return img.subtract(baselineMean).divide(baselineStdDev)}).mean();
+// // Map.addLayer(z.select([0]),{min:0,max:2,palette:cPal},'Z 1');
+// Map.addLayer(z.select([1]),{min:0,max:2,palette:cPal},'Z 2');
+
+// var bloomAnomaly = z.gte(zThresh).selfMask();
+// // Map.addLayer(bloomAnomaly.select([0]),{min:1,max:1,palette:'660000'},'Bloom 1');
+// Map.addLayer(bloomAnomaly.select([1]).focal_max(2),{min:1,max:1,palette:'ff0000'},'Bloom 2');
+
+
+
+
+
 // / APPLY ALGORITHM TO IMAGE -----------------------------------------------------------------------
 
 // // Filter to specific image
