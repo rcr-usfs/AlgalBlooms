@@ -99,6 +99,7 @@ var oregon =
           [-122.0041424979918, 43.770494425923616]]], null, false),
     mn_test = 
     /* color: #d63000 */
+    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -228,11 +229,11 @@ var ndsiComposite = images.qualityMosaic('NDSI');
 Map.addLayer(ndsiComposite,getImagesLib.vizParamsFalse,'Max NDSI Composite',true);
 
 
-// images = images.map(function(img){return img.updateMask(water_mask)})
+images = images.map(function(img){return img.updateMask(water_mask)})
 
 
-// images = images.select(['NDSI','bloom1','bloom2']);
-// Map.addLayer(images,{},'Full Time Series',false);
+images = images.select(['NDSI','bloom1','bloom2']);
+Map.addLayer(images,{},'Full Time Series',false);
 // var baselineImages = images.filter(ee.Filter.calendarRange(baselineStartYear,baselineEndYear,'year'));
 // var analysisImages = images.filter(ee.Filter.calendarRange(analysisStartYear,analysisEndYear,'year'));
 
