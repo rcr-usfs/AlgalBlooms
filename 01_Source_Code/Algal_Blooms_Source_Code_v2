@@ -27,7 +27,6 @@ var oregon =
           [-120.87320009248872, 44.834144261244035]]], null, false),
     clean_crescent_lake = 
     /* color: #1520d6 */
-    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -40,7 +39,6 @@ var oregon =
           [-121.93308296025958, 43.51304992163878]]], null, false),
     dirty_odell_lake = 
     /* color: #eae825 */
-    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -53,7 +51,6 @@ var oregon =
           [-121.93788947881427, 43.60361193043472]]], null, false),
     clean_crater_lake = 
     /* color: #2141ff */
-    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -66,7 +63,6 @@ var oregon =
           [-122.02355641629879, 42.9865102204338]]], null, false),
     dirty_billy_chinook = 
     /* color: #f9ff58 */
-    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -79,7 +75,6 @@ var oregon =
           [-121.2262751476135, 44.62035796573114]]], null, false),
     dirty_haystack_lake = 
     /* color: #ffc82d */
-    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -92,7 +87,6 @@ var oregon =
           [-121.13292269214293, 44.50205986989772]]], null, false),
     clean_waldo_lake = 
     /* color: #1739ff */
-    /* shown: false */
     /* displayProperties: [
       {
         "type": "rectangle"
@@ -102,7 +96,19 @@ var oregon =
         [[[-122.08516666791367, 43.770494425923616],
           [-122.08516666791367, 43.67621099378742],
           [-122.0041424979918, 43.67621099378742],
-          [-122.0041424979918, 43.770494425923616]]], null, false);
+          [-122.0041424979918, 43.770494425923616]]], null, false),
+    mn_test = 
+    /* color: #d63000 */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[-92.40898254274096, 48.17134997592254],
+          [-92.40898254274096, 47.855327704615014],
+          [-91.66465881227221, 47.855327704615014],
+          [-91.66465881227221, 48.17134997592254]]], null, false);
 /***** End of imports. If edited, may not auto-convert in the playground. *****/
 
 //Module imports
@@ -117,7 +123,7 @@ var analysisEndYear = 2018;
 var zThresh = 1.5;
 
 var args = {
-          'studyArea':clean_waldo_lake,
+          'studyArea':mn_test,
           'startYear':baselineStartYear,
           'endYear':analysisEndYear,
           'startJulian':1,
