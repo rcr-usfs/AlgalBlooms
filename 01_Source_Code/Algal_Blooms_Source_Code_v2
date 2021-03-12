@@ -133,14 +133,14 @@ var args = {
           'includeSLCOffL7':true,
           'defringeL5':true,
           'applyQABand':false,
-          'applyCloudProbability':true,
+          'applyCloudProbability':false,
           'applyShadowShift':false,
           'applyCloudScoreLandsat':false,
           'applyCloudScoreSentinel2':false,
-          'applyTDOMLandsat':true,
-          'applyTDOMSentinel2':true,
-          'applyFmaskCloudMask':true,
-          'applyFmaskCloudShadowMask':true,
+          'applyTDOMLandsat':false,
+          'applyTDOMSentinel2':false,
+          'applyFmaskCloudMask':false,
+          'applyFmaskCloudShadowMask':false,
           'applyFmaskSnowMask':false,
           'cloudHeights':ee.List.sequence(500,10000,500),
           'cloudScoreThresh':20,
@@ -231,9 +231,9 @@ Map.addLayer(ndsiComposite,getImagesLib.vizParamsFalse,'Max NDSI Composite',true
 
 images = images.map(function(img){return img.updateMask(water_mask)})
 
-
+Map.addLayer(images.select(['blue','green','red','nir','swir1','swir2','NDSI','brightness']),{},'Full Time Series',false);
 images = images.select(['NDSI','bloom1','bloom2']);
-Map.addLayer(images,{},'Full Time Series',false);
+
 // var baselineImages = images.filter(ee.Filter.calendarRange(baselineStartYear,baselineEndYear,'year'));
 // var analysisImages = images.filter(ee.Filter.calendarRange(analysisStartYear,analysisEndYear,'year'));
 
