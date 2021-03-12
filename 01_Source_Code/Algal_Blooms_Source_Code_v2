@@ -118,9 +118,9 @@ var getImagesLib = require('users/USFS_GTAC/modules:getImagesLib2.js');
 ///////////////////////////////////////////////////////////////////////////////
 // Define user parameters:
 var baselineStartYear = 2017;
-var baselineEndYear = 2017;
-var analysisStartYear = 2018;
-var analysisEndYear = 2018;
+var baselineEndYear = 2019;
+var analysisStartYear = 2020;
+var analysisEndYear = 2020;
 var zThresh = 1.5;
 
 var args = {
@@ -231,7 +231,7 @@ Map.addLayer(ndsiComposite,getImagesLib.vizParamsFalse,'Max NDSI Composite',true
 
 images = images.map(function(img){return img.updateMask(water_mask)})
 
-Map.addLayer(images.select(['blue','green','red','nir','swir1','swir2','NDSI','brightness']),{},'Full Time Series',false);
+Map.addLayer(images.select(['blue','green','red','nir','swir1','swir2','NDSI','brightness','H','bloom2']),{},'Full Time Series',false);
 images = images.select(['NDSI','bloom1','bloom2']);
 
 // var baselineImages = images.filter(ee.Filter.calendarRange(baselineStartYear,baselineEndYear,'year'));
