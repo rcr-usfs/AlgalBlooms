@@ -3,10 +3,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import date
-# from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,AutoMinorLocator)
-# from scipy import stats
-
-# from scipy.interpolate import UnivariateSpline
+import logging
+mpl_logger = logging.getLogger('matplotlib')
+mpl_logger.setLevel(logging.WARNING)
 ###############################################################
 
 ###############################################################
@@ -58,7 +57,7 @@ def convert_to_csv(output_table_name):
       o.close()
 
 ###############################################################
-def hovmuller(table,bin_step = 0.01,background_color = '#1B1716',font_color = '#D6D1CA'):
+def hovmuller(table,bin_step = 0.01,background_color = '#D6D1CA',font_color = '#1B1716'):
   print('Creating hovmuller for:',table)
   #Read in data
   data = pd.read_csv(table)
@@ -177,7 +176,7 @@ def hovmuller(table,bin_step = 0.01,background_color = '#1B1716',font_color = '#
   ax = fig.add_axes([0.1, 0.14, 0.76, 0.85])
 
   cmap = plt.get_cmap('viridis')
-  cf = plt.pcolormesh(dates, bins, hist, cmap = cmap,shading='flat')#, vmin = 500)
+  cf = plt.pcolormesh(dates, bins, hist, cmap = cmap,shading='auto')#, vmin = 500)
   degrees = 45
   plt.xticks(rotation=degrees, fontsize = 8)
 
@@ -185,7 +184,7 @@ def hovmuller(table,bin_step = 0.01,background_color = '#1B1716',font_color = '#
   # q25 = plt.plot(dates, percentiles[0.05], linestyle = ':', color = 'w', linewidth = 2)
   # q50 = plt.plot(dates, pred_1, linestyle = '--', color = '#FF0000', linewidth = 2)
   # q50 = plt.plot(dates, pred_1_2, linestyle = '--', color = '#FF8800', linewidth = 2)
-  q50 = plt.plot(dates, pred_1_2_3, linestyle = '--', color = '#FFFFFF', linewidth = 1)
+  q50 = plt.plot(dates, pred_1_2_3, linestyle = '-', color = background_color, linewidth = 2)
   # q75 = plt.plot(dates, spl(table_all_dates_i), linestyle = ':', color = 'w', linewidth = 2)
   # for i in np.arange(0,1,0.1):
   #   spl.set_smoothing_factor(i)
@@ -198,10 +197,10 @@ def hovmuller(table,bin_step = 0.01,background_color = '#1B1716',font_color = '#
   ax.yaxis.set_major_locator(plt.MultipleLocator(0.1))
   ax.yaxis.set_minor_locator(plt.MultipleLocator(1))
   
-  ax.grid(True, which='major', axis='y', linestyle='--', color='k')
-  ax.grid(True, which='major', axis='x', linestyle='--', color='k')
-  ax.text(0.99, 0.99, index_name, transform=ax.transAxes, 
-    fontsize = 15, color = font_color, verticalalignment='top', horizontalalignment = 'right')
+  ax.grid(True, which='major', axis='y', linestyle='--', color=font_color)
+  ax.grid(True, which='major', axis='x', linestyle='--', color=font_color)
+  # ax.text(0.99, 0.99, index_name, transform=ax.transAxes, 
+    # fontsize = 15, color = font_color, verticalalignment='top', horizontalalignment = 'right')
 
   cbax = fig.add_axes([0.88, 0.14, 0.03, 0.85]) 
   cb = plt.colorbar(cf, cax = cbax, orientation = 'vertical')
