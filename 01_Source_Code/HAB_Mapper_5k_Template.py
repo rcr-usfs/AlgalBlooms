@@ -2,18 +2,24 @@ from HAB_Mapper_5k_Lib import *
 ##################################################
 cleanStartYear = 2020
 cleanEndYear = 2020
-startJulian = 160
-endJulian =280
+startMonth = 5
+endMonth =9
 
-
+stats_json = r'Q:\Algal_detection_GEE_work\HAB_Mapper_5k_Outputs\clean_stats.json'
 analysisYears = [2020]
 
 reducer = ee.Reducer.percentile([50])
-clean_stats = precomputed_stats['WA']
+
 
 hab_indices = ['bloom2','NDGI']
+
+study_area_state = 'Oregon'
+study_area_stats_key = 'OR'
+
 #Define clean control stats
-or_clean_lake_combo = ee.Geometry.MultiPolygon(\
+clean_lakes = {}
+
+clean_lakes['OR'] = ee.Geometry.MultiPolygon(\
         [[[[-122.16247277538403, 42.98060571118538],\
            [-122.16247277538403, 42.9016878744337],\
            [-122.0512362031184, 42.9016878744337],\
@@ -25,9 +31,8 @@ or_clean_lake_combo = ee.Geometry.MultiPolygon(\
          [[[-122.06863020193826, 43.76538659547769],\
            [-122.06863020193826, 43.6812758137654],\
            [-122.00648878348123, 43.6812758137654],\
-           [-122.00648878348123, 43.76538659547769]]]], None, False)
-
-wy_clean_lake_combo = ee.Geometry.MultiPolygon(\
+           [-122.00648878348123, 43.76538659547769]]]], None, False) 
+clean_lakes['WY'] = ee.Geometry.MultiPolygon(\
         [[[[-109.56790010304167, 42.96292917782831],\
            [-109.56790010304167, 42.953161377243354],\
            [-109.55584089131071, 42.953161377243354],\
@@ -41,7 +46,7 @@ wy_clean_lake_combo = ee.Geometry.MultiPolygon(\
            [-108.92897499138937, 42.57948841139656],\
            [-108.92897499138937, 42.591368975972856]]]], None, False)
 
-wa_clean_lake_combo = ee.Geometry.MultiPolygon(\
+clean_lakes['WA'] = ee.Geometry.MultiPolygon(\
         [[[[-121.32593536613808, 47.586467669618045],\
            [-121.32593536613808, 47.56342205752472],\
            [-121.27993011711465, 47.56342205752472],\
@@ -54,29 +59,27 @@ wa_clean_lake_combo = ee.Geometry.MultiPolygon(\
            [-121.33949661491738, 47.59723425208618],\
            [-121.32748031853066, 47.59723425208618],\
            [-121.32748031853066, 47.60695700338792]]]], None, False)
-dirty_billy_chinook = ee.Geometry.Polygon(\
-        [[[-121.48239392202757, 44.62035796573114],\
-          [-121.48239392202757, 44.509308410535326],\
-          [-121.2262751476135, 44.509308410535326],\
-          [-121.2262751476135, 44.62035796573114]]], None, False)
-        
-dirty_odell_lake = ee.Geometry.Polygon(\
-        [[[-122.0549625378963, 43.59540724921347],\
-          [-122.0549625378963, 43.547151047382215],\
-          [-121.95436897100177, 43.547151047382215],\
-          [-121.95436897100177, 43.59540724921347]]], None, False)
-
-clean_lakes = wa_clean_lake_combo
-dirty_lakes = dirty_odell_lake
+summary_areas = {}
+summary_areas['WA'] = ee.FeatureCollection('projects/gtac-algal-blooms/assets/ancillary/WA_FS_Named_Recreation_Lakes_v2')
+summary_areas['OR'] = ee.FeatureCollection('projects/gtac-algal-blooms/assets/ancillary/OR_FS_Named_Recreation_Lakes_v2')
+summary_areas['WY'] = ee.FeatureCollection('projects/gtac-algal-blooms/assets/ancillary/WY_FS_Named_Recreation_Lakes_v2')
 
 
-water_mask = getWaterMask(cleanStartYear,cleanEndYear,startJulian,endJulian)
-clean_lakes = water_mask.clip(clean_lakes).reduceToVectors(scale = 30)
-Map.addLayer(clean_lakes,{},'Clean Lakes')
+states = ee.FeatureCollection("TIGER/2018/States")
+study_area = states.filter(ee.Filter.eq('NAME',study_area_state))
+
+
+
+
+
+
 
 ############################################################################
-
-# getStats(clean_lakes,cleanStartYear,cleanEndYear,startJulian,endJulian,hab_indices)
+clean_stats = getStats(clean_lakes,cleanStartYear,cleanEndYear,startMonth,endMonth,stats_json,hab_indices)
 for analysisYear in analysisYears:
-  mapHABs(dirty_lakes,analysisYear,startJulian,endJulian,reducer,hab_indices,clean_stats)
+  for month in range(startMonth,endMonth+1):
+    mapHABs(study_area,analysisYear,month,clean_stats,study_area_stats_key,reducer,hab_indices)
+
+Map.addLayer(summary_areas[study_area_stats_key],{},'Rec Lakes',False)
+
 Map.view()
