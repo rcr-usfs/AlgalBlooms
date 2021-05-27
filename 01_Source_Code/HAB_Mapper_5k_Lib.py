@@ -87,33 +87,31 @@ def getStats(studyAreas,startYear,endYear,startMonth,endMonth,stats_json,bands =
           tryCount+=1
       else:
         print('Already computed stats for:',studyArea,month)
-  o = open(stats_json,'w')
-  o.write(json.dumps(out_stats))
-  o.close()
+      o = open(stats_json,'w')
+      o.write(json.dumps(out_stats))
+      o.close()
   return out_stats
   # Map.addLayer(clean_composite,getImagesLib.vizParamsFalse,'Clean Lakes Composite')
 	
 ############################################################################
 ############################################################################
-def mapHABs(studyArea,analysisYear,month,clean_stats,stats_sa,reducer = ee.Reducer.percentile([50]),bands = ['bloom2','NDGI']):
-  startJulian = int(ee.Date.fromYMD(2003,month,1).format('DD').getInfo())
-  endJulian = int(ee.Date.fromYMD(2003,month,1).advance(1,'month').advance(-1,'day').format('DD').getInfo())
-  print(analysisYear,month,startJulian,endJulian)
+def mapHABs(studyArea,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,stats_sa,reducer = ee.Reducer.percentile([50]),bands = ['bloom2','NDGI'],z_thresh = 2):
   try:
     saBounds = studyArea.geometry().bounds()
   except:
     saBounds = studyArea.bounds()
 
-  waterMask = getWaterMask(analysisYear,analysisYear,month,month)
-  # Map.addLayer(studyArea,{},'Study Area')
-  # Map.addLayer(waterMask,{'min':1,'max':1,'palette':'00F'},'Water Mask')
-
+  startJulian = int(ee.Date.fromYMD(analysisStartYear,startMonth,1).format('DD').getInfo())
+  endJulian = int(ee.Date.fromYMD(analysisEndYear,endMonth,1).advance(1,'month').advance(-1,'day').format('DD').getInfo())
+  print(analysisStartYear,analysisEndYear,startMonth,endMonth, startJulian,endJulian)
+  
   dirty_imgs = getImagesLib.getProcessedLandsatAndSentinel2Scenes(
     saBounds,
-    analysisYear,
-    analysisYear,
+    analysisStartYear,
+    analysisEndYear,
     startJulian,
     endJulian,
+    convertToDailyMosaics = True,
     preComputedLandsatCloudScoreOffset = preComputedLandsatCloudScoreOffset,
     preComputedSentinel2CloudScoreOffset=preComputedSentinel2CloudScoreOffset,
     preComputedLandsatTDOMIRMean = preComputedLandsatTDOMIRMean,
@@ -121,15 +119,33 @@ def mapHABs(studyArea,analysisYear,month,clean_stats,stats_sa,reducer = ee.Reduc
     preComputedSentinel2TDOMIRMean=preComputedSentinel2TDOMIRMean,
     preComputedSentinel2TDOMIRStdDev=preComputedSentinel2TDOMIRStdDev)
   dirty_imgs = dirty_imgs.map(getImagesLib.HoCalcAlgorithm2)
-  Map.addLayer(dirty_imgs.median(),getImagesLib.vizParamsFalse,'Composite yr{} m{}'.format(analysisYear,month),False)
-  dirty_imgs = dirty_imgs.select(bands)
+  for analysisYear in range(analysisStartYear,analysisEndYear+1):
+    for month in range(startMonth,endMonth+1):
+      startJulianT = int(ee.Date.fromYMD(analysisYear,month,1).format('DD').getInfo())
+      endJulianT = int(ee.Date.fromYMD(analysisYear,month,1).advance(1,'month').advance(-1,'day').format('DD').getInfo())
+      dirty_imgsT = dirty_imgs.filter(ee.Filter.calendarRange(analysisYear,analysisYear,'year'))\
+                              .filter(ee.Filter.calendarRange(startJulianT,endJulianT))
+      # print(dirty_imgsT.size().getInfo(),analysisYear,month,startJulianT,endJulianT)
+  
+  # # Map.addLayer(studyArea,{},'Study Area')
+  # # Map.addLayer(waterMask,{'min':1,'max':1,'palette':'00F'},'Water Mask')
 
-  means = ee.Image([clean_stats['{}_{}'.format(stats_sa,month)][band+'_mean'] for band in bands])
-  stdDevs = ee.Image([clean_stats['{}_{}'.format(stats_sa,month)][band+'_stdDev'] for band in bands])
-  dirty_zs = dirty_imgs.map(lambda img: img.subtract(means).divide(stdDevs).updateMask(waterMask))
+  
  
-  Map.addLayer(dirty_zs.reduce(reducer).select([0]),{'min':0,'max':2,'palette':'00F,0F0'},'Dirty Z yr{} m{}'.format(analysisYear,month),False)
-  # clean_stats_img = ee.Image(clean_stats.keys())
+      Map.addLayer(dirty_imgsT.median(),getImagesLib.vizParamsFalse,'Composite yr{} m{}'.format(analysisYear,month),False)
+      dirty_imgsT = dirty_imgsT.select(bands)
+
+      waterMask = getWaterMask(analysisYear,analysisYear,month,month)
+      means = ee.Image([clean_stats['{}_{}'.format(stats_sa,month)][band+'_mean'] for band in bands])
+      stdDevs = ee.Image([clean_stats['{}_{}'.format(stats_sa,month)][band+'_stdDev'] for band in bands])
+      dirty_zs = dirty_imgsT.map(lambda img: img.subtract(means).divide(stdDevs).updateMask(waterMask))
+    
+      dirty_z = dirty_zs.reduce(reducer).reduce(ee.Reducer.max())
+      hab = dirty_z.gte(z_thresh).selfMask()
+
+      Map.addLayer(dirty_z,{'min':0,'max':2,'palette':'00F,0F0'},'Dirty Z yr{} m{}'.format(analysisYear,month),False)
+      Map.addLayer(hab,{'min':1,'max':1,'palette':'0FF'},'HAB yr{} m{}'.format(analysisYear,month),False)
+
 
 ############################################################################
 

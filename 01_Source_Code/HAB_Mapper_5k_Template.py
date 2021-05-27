@@ -1,18 +1,30 @@
 from HAB_Mapper_5k_Lib import *
 ##################################################
-cleanStartYear = 2020
+#Specify years to compute statistis (mean and stdDev) for clean lakes
+cleanStartYear = 2018
 cleanEndYear = 2020
-startMonth = 5
-endMonth =9
 
+#Specify years to map HABs
+analysisStartYear = 2020
+analysisEndYear = 2020
+
+#Specify which months to map HABs for
+startMonth = 7
+endMonth =8
+
+#Location of clean lakes statistics
 stats_json = r'Q:\Algal_detection_GEE_work\HAB_Mapper_5k_Outputs\clean_stats.json'
-analysisYears = [2020]
 
+#Z score reducer
 reducer = ee.Reducer.percentile([50])
 
+#Z score threshold for identifying HABs (generally 1-3 or so works well)
+z_thresh = 2
 
-hab_indices = ['bloom2','NDGI']
+#Indices to use
+hab_indices = ['NDGI']
 
+#State study area to map
 study_area_state = 'Oregon'
 study_area_stats_key = 'OR'
 
@@ -59,27 +71,24 @@ clean_lakes['WA'] = ee.Geometry.MultiPolygon(\
            [-121.33949661491738, 47.59723425208618],\
            [-121.32748031853066, 47.59723425208618],\
            [-121.32748031853066, 47.60695700338792]]]], None, False)
+
+#Bring in summary areas
 summary_areas = {}
 summary_areas['WA'] = ee.FeatureCollection('projects/gtac-algal-blooms/assets/ancillary/WA_FS_Named_Recreation_Lakes_v2')
 summary_areas['OR'] = ee.FeatureCollection('projects/gtac-algal-blooms/assets/ancillary/OR_FS_Named_Recreation_Lakes_v2')
 summary_areas['WY'] = ee.FeatureCollection('projects/gtac-algal-blooms/assets/ancillary/WY_FS_Named_Recreation_Lakes_v2')
 
-
+#Set up study area
 states = ee.FeatureCollection("TIGER/2018/States")
 study_area = states.filter(ee.Filter.eq('NAME',study_area_state))
-
-
-
-
-
-
-
 ############################################################################
+#Get clean lake stats
+#Will compute them if they do not exist
 clean_stats = getStats(clean_lakes,cleanStartYear,cleanEndYear,startMonth,endMonth,stats_json,hab_indices)
-for analysisYear in analysisYears:
-  for month in range(startMonth,endMonth+1):
-    mapHABs(study_area,analysisYear,month,clean_stats,study_area_stats_key,reducer,hab_indices)
+
+#Map habs
+mapHABs(study_area,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,study_area_stats_key,reducer,hab_indices,z_thresh)
+
 
 Map.addLayer(summary_areas[study_area_stats_key],{},'Rec Lakes',False)
-
 Map.view()
