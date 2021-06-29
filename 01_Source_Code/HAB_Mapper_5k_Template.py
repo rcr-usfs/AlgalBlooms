@@ -1,23 +1,23 @@
 from HAB_Mapper_5k_Lib import *
 ##################################################
 #Specify years to compute statistis (mean and stdDev) for clean lakes
-cleanStartYear = 2020
+cleanStartYear = 2019
 cleanEndYear = 2020
 
 #Specify years to map HABs
-analysisStartYear = 2010
+analysisStartYear = 2020
 analysisEndYear = 2020
 
 #Specify which months to map HABs for
-startMonth = 3
-endMonth =10
+startMonth = 7
+endMonth = 7
 
 #Location of clean lakes statistics - local path
 stats_json = r'Q:\Algal_detection_GEE_work\HAB_Mapper_5k_Outputs\clean_stats.json'
 
 
 #Export Params
-exportZAndTables = True
+exportZAndTables = False
 
 #GEE Asset folder location for HAB percent summary tables
 hab_summary_table_folder = 'projects/gtac-algal-blooms/assets/outputs/HAB-Summary-Tables'
@@ -45,19 +45,19 @@ study_area_stats_key = 'WY'
 #Define clean control stats
 clean_lakes = {}
 
-# clean_lakes['OR'] = ee.Geometry.MultiPolygon(\
-#         [[[[-122.16247277538403, 42.98060571118538],\
-#            [-122.16247277538403, 42.9016878744337],\
-#            [-122.0512362031184, 42.9016878744337],\
-#            [-122.0512362031184, 42.98060571118538]]],\
-#          [[[-122.03353176573546, 43.50210081409495],\
-#            [-122.03353176573546, 43.45925265588565],\
-#            [-121.95216427305968, 43.45925265588565],\
-#            [-121.95216427305968, 43.50210081409495]]],\
-#          [[[-122.06863020193826, 43.76538659547769],\
-#            [-122.06863020193826, 43.6812758137654],\
-#            [-122.00648878348123, 43.6812758137654],\
-#            [-122.00648878348123, 43.76538659547769]]]], None, False) 
+clean_lakes['OR'] = ee.Geometry.MultiPolygon(\
+        [[[[-122.16247277538403, 42.98060571118538],\
+           [-122.16247277538403, 42.9016878744337],\
+           [-122.0512362031184, 42.9016878744337],\
+           [-122.0512362031184, 42.98060571118538]]],\
+         [[[-122.03353176573546, 43.50210081409495],\
+           [-122.03353176573546, 43.45925265588565],\
+           [-121.95216427305968, 43.45925265588565],\
+           [-121.95216427305968, 43.50210081409495]]],\
+         [[[-122.06863020193826, 43.76538659547769],\
+           [-122.06863020193826, 43.6812758137654],\
+           [-122.00648878348123, 43.6812758137654],\
+           [-122.00648878348123, 43.76538659547769]]]], None, False) 
 clean_lakes['WY'] = ee.Geometry.MultiPolygon(\
         [[[[-109.56790010304167, 42.96292917782831],\
            [-109.56790010304167, 42.953161377243354],\
@@ -72,19 +72,19 @@ clean_lakes['WY'] = ee.Geometry.MultiPolygon(\
            [-109.82924448879845, 42.98683332211115],\
            [-109.82924448879845, 43.02675227419442]]]], None, False)
 
-# clean_lakes['WA'] = ee.Geometry.MultiPolygon(\
-#         [[[[-121.32593536613808, 47.586467669618045],\
-#            [-121.32593536613808, 47.56342205752472],\
-#            [-121.27993011711465, 47.56342205752472],\
-#            [-121.27993011711465, 47.586467669618045]]],\
-#          [[[-121.39322662590371, 47.59920209760001],\
-#            [-121.39322662590371, 47.57685691359207],\
-#            [-121.37297058342324, 47.57685691359207],\
-#            [-121.37297058342324, 47.59920209760001]]],\
-#          [[[-121.33949661491738, 47.60695700338792],\
-#            [-121.33949661491738, 47.59723425208618],\
-#            [-121.32748031853066, 47.59723425208618],\
-#            [-121.32748031853066, 47.60695700338792]]]], None, False)
+clean_lakes['WA'] = ee.Geometry.MultiPolygon(\
+        [[[[-121.32593536613808, 47.586467669618045],\
+           [-121.32593536613808, 47.56342205752472],\
+           [-121.27993011711465, 47.56342205752472],\
+           [-121.27993011711465, 47.586467669618045]]],\
+         [[[-121.39322662590371, 47.59920209760001],\
+           [-121.39322662590371, 47.57685691359207],\
+           [-121.37297058342324, 47.57685691359207],\
+           [-121.37297058342324, 47.59920209760001]]],\
+         [[[-121.33949661491738, 47.60695700338792],\
+           [-121.33949661491738, 47.59723425208618],\
+           [-121.32748031853066, 47.59723425208618],\
+           [-121.32748031853066, 47.60695700338792]]]], None, False)
 
 #Bring in summary areas
 summary_areas_dict = {}
@@ -111,3 +111,10 @@ mapHABs(summary_areas,study_area_stats_key,analysisStartYear,analysisEndYear,sta
 
 if not exportZAndTables:
   Map.view()
+
+#Make all assets public
+# import geeViz.assetManagerLib as aml
+# tables = aml.walkFoldersTables(hab_summary_table_folder)
+# for table in tables:aml.updateACL(table)
+
+#https://code.earthengine.google.com/dcfabfe5b79edd8a4614adec91e17165

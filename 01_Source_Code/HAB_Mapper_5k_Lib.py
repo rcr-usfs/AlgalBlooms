@@ -41,10 +41,10 @@ def getWaterMask(startYear,endYear,startMonth,endMonth,contractPixels = 2.5):
                 .filter(ee.Filter.calendarRange(startWaterYear,endWaterYear,'year'))\
                 .filter(ee.Filter.calendarRange(startMonth,endMonth,'month')).mode().eq(2).unmask(0).focal_min(contractPixels)
 
-  water_mask = permWater.Or(tempWater).selfMask()
+  water_mask = permWater.Or(tempWater)
   return water_mask
 ############################################################################
-def getStats(studyAreas,startYear,endYear,startMonth,endMonth,stats_json,bands = ['bloom2','NDGI'],maxTries = 10,crs = 'EPSG:5070',transform = [30,0,-2361915.0,0,-30,3177735.0]):
+def getStats(studyAreas,startYear,endYear,startMonth,endMonth,stats_json,bands = ['bloom2','NDGI'],maxTries = 20,crs = 'EPSG:5070',transform = [30,0,-2361915.0,0,-30,3177735.0]):
   out_stats = {}
   if os.path.exists(stats_json):
     o = open(stats_json,'r')
@@ -58,7 +58,7 @@ def getStats(studyAreas,startYear,endYear,startMonth,endMonth,stats_json,bands =
       sa_month_key = '{}_{}'.format(studyArea,month)
       if sa_month_key not in out_stats.keys():
         print(studyArea,month)
-        water_mask = getWaterMask(startYear,endYear,startMonth,endMonth)
+        water_mask = getWaterMask(startYear,endYear,startMonth,endMonth).selfMask()
         clean_lakes = water_mask.clip(sa).reduceToVectors(scale = 30)
         Map.addLayer(clean_lakes,{},'Clean Lakes {} {}'.format(studyArea,month))
         try:
@@ -154,7 +154,8 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
                               .filter(ee.Filter.calendarRange(startJulianT,endJulianT))
 
       # waterMask = dirty_imgsT.map(simpleWaterMask).mode()
-      waterMask = simpleWaterMask(dirty_imgsT.median())
+      gtacWaterMask = simpleWaterMask(dirty_imgsT.median())
+      # jrcWaterMask = getWaterMask(analysisYear,analysisYear,month,month)
       # print(dirty_imgsT.size().getInfo(),analysisYear,month,startJulianT,endJulianT)
   
   
@@ -163,10 +164,11 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
   
  
       Map.addLayer(dirty_imgsT.median(),getImagesLib.vizParamsFalse,'Composite yr{} m{}'.format(analysisYear,month),False)
-      Map.addLayer(waterMask.selfMask(),{'min':1,'max':1,'palette':'00F'},'Water Mask yr{} m{}'.format(analysisYear,month),False)
+      Map.addLayer(gtacWaterMask.selfMask(),{'min':1,'max':1,'palette':'00F','classLegendDict':{'Water':'00F'}},'GTAC Water Mask yr{} m{}'.format(analysisYear,month),False)
+      # Map.addLayer(jrcWaterMask.selfMask(),{'min':1,'max':1,'palette':'00F','classLegendDict':{'Water':'00F'}},'JRC Water Mask yr{} m{}'.format(analysisYear,month),False)
       dirty_imgsT = dirty_imgsT.select(bands)
 
-      # waterMask = getWaterMask(analysisYear,analysisYear,month,month)
+      waterMask = gtacWaterMask
       means = ee.Image([clean_stats['{}_{}'.format(stats_sa,month)][band+'_mean'] for band in bands])
       stdDevs = ee.Image([clean_stats['{}_{}'.format(stats_sa,month)][band+'_stdDev'] for band in bands])
       dirty_zs = dirty_imgsT.map(lambda img: img.subtract(means).divide(stdDevs).updateMask(waterMask))
@@ -175,7 +177,7 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
       hab = dirty_z.gte(z_thresh).rename(['HAB_Pct'])
 
       Map.addLayer(dirty_z,{'min':0,'max':2,'palette':'00F,0F0,F00'},'Dirty Z yr{} m{}'.format(analysisYear,month),False)
-      Map.addLayer(hab,{'min':0,'max':1,'palette':'00F,F00'},'HAB yr{} m{}'.format(analysisYear,month),False)
+      Map.addLayer(hab,{'min':0,'max':1,'palette':'00F,F00','classLegendDict':{'Not HAB':'00F','HAB':'F00'}},'HAB yr{} m{}'.format(analysisYear,month),False)
       # print(summaryAreas.size().getInfo())
       
       # print(summary_table.size().getInfo())
@@ -185,7 +187,7 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
         sum = ee.Number(a.reduce(ee.Reducer.sum(),[0]).get([0]))
         a = ee.Number(a.toList().get(1))
         pct = ee.Number(a.divide(sum).multiply(100))
-        return f.set({inField:pct,outField:pct})
+        return f.set({inField:pct,outField:pct,'year':analysisYear,'month':month})
 
       if exportZAndTables:
         summary_table = hab.reduceRegions(summaryAreas, ee.Reducer.fixedHistogram(0, 2, 2), None, crs, transform, 4)
