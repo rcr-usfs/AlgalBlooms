@@ -32,8 +32,6 @@ summary_areas_dict['OR'] = ee.FeatureCollection('projects/gtac-algal-blooms/asse
 summary_areas_dict['WY'] = ee.FeatureCollection('projects/gtac-algal-blooms/assets/ancillary/WY_FS_Named_Recreation_Lakes_v2');
 
 //-------- Map Panel-----------------
-// app.center = {lon:-118.1803, lat:36.8341,zoom:12};//Zoomed in center
-// app.center = {lon:-119, lat:38.2486,zoom:6};//Zoomed to all CA
 app.map = ui.Map();
 app.map.style().set({cursor:'crosshair'});
 app.map.setOptions('HYBRID');
@@ -113,6 +111,8 @@ app.updateState = function(){
 app.run = function(){
   
   app.map.clear();
+  app.map.add(app.toggleFiltersButton);
+  app.map.add(app.togglePlotPanelButton);
   app.map.setOptions('HYBRID');
   app.legendPanel.clear();
   var startYear = app.startYearSlider.getValue();
@@ -386,14 +386,7 @@ app.plotPanel.add(ui.Label('Map Key',{fontWeight:'bold',fontSize:'12pt'}));
 app.plotPanel.add(app.legendPanel);
 app.plotPanel.add(app.wideBlackline());
 /////////////////////////////////////////////////////////////
-//Put app together
-ui.root.clear();
-ui.root.add(app.optionsFiltersPanel);
 
-ui.root.add(app.map);
-ui.root.add(app.plotPanel);
-// ui.root.add(app.plotPanel);
-app.updateState();
 app.filtersShown = true;
 app.plotsShown = true;
 app.hideFilters = function(){
@@ -430,10 +423,16 @@ app.togglePlotPanel = function(){
 app.toggleFiltersButton = ui.Button('<--',app.toggleFilters,false,{padding:'0px',margin:'0px',fontSize:'5px',position:'top-left'});
 app.togglePlotPanelButton = ui.Button('-->',app.togglePlotPanel,false,{padding:'0px',margin:'0px',fontSize:'5px',position:'top-right'});
 
-app.map.add(app.toggleFiltersButton);
-app.map.add(app.togglePlotPanelButton);
 
-// app.hideFilters();
-// app.showFilters();
+
+/////////////////////////////////////////////////////////////
+//Put app together
+ui.root.clear();
+ui.root.add(app.optionsFiltersPanel);
+
+ui.root.add(app.map);
+ui.root.add(app.plotPanel);
+app.updateState();
+
 
 

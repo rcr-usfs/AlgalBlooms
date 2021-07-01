@@ -227,9 +227,84 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
       # getImagesLib.exportToAssetWrapper(dirty_z_for_export,output_z_name,hab_z_imageCollection + '/'+ output_z_name,pyramidingPolicyObject = None,roi= studyArea,scale= None,crs = crs,transform = transform)
       # print(summary_table.getInfo())
 ############################################################################
+#Make all assets public
+def makeTablesPublic(table_dir):
+  tables = ee.data.getList({'id':table_dir})
+  for table in tables:
+      table = table['id']
+      print('Making public: ',table)
+      ee.data.setAssetAcl(table, json.dumps({u'writers': [], u'all_users_can_read': True, u'readers': []}))
+
+#Simplify tables
+def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMonth,endMonth,states = ['WA','OR'],pct_HAB_threshold = 5,unique_area_field = 'GNIS_Name'):
+  keep_fields = ['ADMINFORES', 'AreaSqKm', 'DISTRICTNA', 'DISTRICTNU', 'DISTRICTOR', 'Elevation', 'FCode', 'FDate', 'FID_FS_Bou', 'FID_S_USA_', 'FID_WA_FS_', 'FID_WA_Nam', 'FORESTNAME', 'FORESTNUMB', 'FORESTORGC', 'FType', 'GIS_ACRES', 'GIS_ACRE_1', 'GNIS_ID', 'GNIS_Name', 'OBJECTID', 'Permanent_', 'RANGERDIST', 'REGION', 'REGION_1', 'ReachCode', 'Resolution', 'SHAPE_AR_1', 'SHAPE_LEN', 'SHAPE__Are', 'SHAPE__Len', 'Shape_Area', 'Shape_Leng', 'Visibility', 'state']
+
+  keep_fields = ['state','REGION','FORESTNAME','GNIS_Name']
+  if not os.path.exists(output_table_dir):os.makedirs(output_table_dir)
+  years = range(startYear,endYear+1)
+  months = range(startMonth,endMonth+1)
+  print('Reading in tables')
+  tables = ee.data.getList({'id':input_table_dir})
+  tables = [i['id'] for i in tables]
+  tables = [i for i in tables if i.split('/')[-1].split('_')[0] in states]
+  tables = [i for i in tables if int(i.split('/')[-1].split('_yr')[-1].split('_')[0]) in years]
+  tables = [i for i in tables if int(i.split('/')[-1].split('_m')[-1]) in months]
+
+  #Read in tables
+  def getTable(t):
+    f = ee.FeatureCollection(t)
+    m = int(t.split('_m')[-1])
+    y = int(t.split('_yr')[-1].split('_')[0])
+    state = t.split('/')[-1].split('_')[0]
+    date = ee.Date.fromYMD(y,m,1).format('YYYY-MM')
+    f = f.map(lambda ft: ft.set({'date':date,'year':int(y),'month':int(m),'state':state}))
+    return f
+  tables = list(map(getTable,tables))
+  tables = ee.FeatureCollection(tables).flatten().sort('date')
+  tables = tables.map(lambda f: f.set('unid',ee.String(f.get('ReachCode')).cat('_').cat(ee.String(f.get('GNIS_Name')))))
+  print(tables.first().getInfo())
+  rec_site_names = ee.Dictionary(tables.aggregate_histogram(unique_area_field)).keys()
+  habs_found_fieldname = 'Algal_Positive_Count_yrs{}-{}_mths{}-{}'.format(startYear,endYear,startMonth,endMonth)
+  clean_found_fieldname = 'Algal_Negative_Count_yrs{}-{}_mths{}-{}'.format(startYear,endYear,startMonth,endMonth)
+  def summarizeByName(name):
+    tablesT = tables.filter(ee.Filter.eq(unique_area_field,name))
+    hab = ee.Number(tablesT.filter(ee.Filter.gte('Pct_HAB',pct_HAB_threshold)).size())
+    clean = ee.Number(tablesT.filter(ee.Filter.lt('Pct_HAB',pct_HAB_threshold)).size())
+    
+    first = ee.Feature(tablesT.first()).select(keep_fields)
+    return first.set({habs_found_fieldname:hab,clean_found_fieldname:clean})
+  print('Downloading table')
+  success = False
+  tryCount = 0
+  while not success and tryCount < 10:
+    tryCount +=1
+    try:
+      tables = rec_site_names.map(summarizeByName).getInfo()
+      success = True
+    except Exception as e:
+      print(e)
+      print('Trying again: ',tryCount)
+  print('Writing output table')
+  tables = [i['properties'] for i in tables]
+  header = ','.join([str(i) for i in list(tables[0].keys())])
+  out = [header]
+  for table in tables:out.append(','.join([str(i) for i in list(table.values())]))
+  out = '\n'.join(out)
+  out_name = os.path.join(output_table_dir,'HAB_Mapper_5k_Summaries_{}_yrs{}-{}_mths{}-{}.csv'.format('-'.join(states),startYear,endYear,startMonth,endMonth))
+  o = open(out_name,'w')
+  o.write(out)
+  o.close()
 
 
 
+  # tables = [i for i in tables if i.split('/')[-1].split('_yr')[-1].split('_')[0]
+    
+
+
+
+
+
+############################################################################
 
 dirty_lakes = {}
 dirty_lakes['billy_chinook'] = ee.Geometry.Polygon(\

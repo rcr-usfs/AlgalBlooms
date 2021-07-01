@@ -21,7 +21,7 @@ exportZAndTables = False
 
 #GEE Asset folder location for HAB percent summary tables
 hab_summary_table_folder = 'projects/gtac-algal-blooms/assets/outputs/HAB-Summary-Tables'
-
+local_hab_summary_table_folder = r'Q:\Algal_detection_GEE_work\HAB_Mapper_5k_Outputs\summary_tables'
 #GEE Asset imageCollection location for HAB z score images
 hab_z_imageCollection = 'projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images'
 
@@ -104,17 +104,18 @@ summary_areas = summary_areas_dict[study_area_stats_key]
 ############################################################################
 #Get clean lake stats
 #Will compute them if they do not exist
-clean_stats = getStats(clean_lakes,cleanStartYear,cleanEndYear,startMonth,endMonth,stats_json,hab_indices)
+# clean_stats = getStats(clean_lakes,cleanStartYear,cleanEndYear,startMonth,endMonth,stats_json,hab_indices)
 
 #Map habs
-mapHABs(summary_areas,study_area_stats_key,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,study_area_stats_key,reducer,hab_indices,z_thresh,exportZAndTables,hab_summary_table_folder,hab_z_imageCollection,crs,transform)
+# mapHABs(summary_areas,study_area_stats_key,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,study_area_stats_key,reducer,hab_indices,z_thresh,exportZAndTables,hab_summary_table_folder,hab_z_imageCollection,crs,transform)
 
-if not exportZAndTables:
-  Map.view()
+#Make tables public
+# makeTablesPublic(hab_summary_table_folder)
 
-#Make all assets public
-# import geeViz.assetManagerLib as aml
-# tables = aml.walkFoldersTables(hab_summary_table_folder)
-# for table in tables:aml.updateACL(table)
+#Summarize tables
+summarizeTables(hab_summary_table_folder,local_hab_summary_table_folder,2015,2020,6,9,['WA','OR'])
 
-#https://code.earthengine.google.com/dcfabfe5b79edd8a4614adec91e17165
+#https://code.earthengine.google.com/dcfabfe5b79edd8a4614adec91e17165   
+
+# if not exportZAndTables:
+#   Map.view()
