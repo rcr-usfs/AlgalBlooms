@@ -10,15 +10,15 @@ hab_z_imageCollection = 'projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images'
 
 tables = ee.data.listAssets({'parent':hab_summary_table_folder})
 
-for table in tables['assets']:
-  print('Deleting: ',table['id'])
-  ee.data.deleteAsset(table['id'])
+# for table in tables['assets']:
+#   print('Deleting: ',table['id'])
+#   ee.data.deleteAsset(table['id'])
 
 
-z_imgs = ee.ImageCollection(hab_z_imageCollection)
-for img in z_imgs.aggregate_array('system:index').getInfo():
-  print('Deleting: ',hab_z_imageCollection+'/'+img)
-  ee.data.deleteAsset(hab_z_imageCollection+'/'+img)
+# z_imgs = ee.ImageCollection(hab_z_imageCollection)
+# for img in z_imgs.aggregate_array('system:index').getInfo():
+#   print('Deleting: ',hab_z_imageCollection+'/'+img)
+#   ee.data.deleteAsset(hab_z_imageCollection+'/'+img)
 
 
 tasks = ee.data.getTaskList()

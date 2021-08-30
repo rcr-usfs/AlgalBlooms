@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+    <title>{TITLE}</title>
+
+    <style>
+      html,
+      body,
+      #viewDiv {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        width: 100%;
+      }
+      .legend-title { text-align: left; margin-bottom: 5px; margin-left:5px;font-weight: bold; font-size: 90%; width: 100%; }
+      .legend-scale ul { margin: 5px; padding: 0px; list-style: none; width: 90%; }
+      .legend-scale ul li { font-size: 80%; list-style: none; margin-left: 0px; line-height: 18px; margin-bottom: 2px; }
+      ul.legend-labels li span { display: block; float: left; height: 14px; width: 25px; margin-right: 5px; margin-left: 0px; }
+      .legend-source { font-size: 70%; color: rgb(153, 153, 153); clear: both; }
+      a { color: rgb(119, 119, 119); border-radius: 10px; }
+    </style>
+
+    <link
+      rel="stylesheet"
+      href="https://js.arcgis.com/4.20/esri/themes/dark/main.css"
+    />
+
+    <div id='legend-div' class='my-legend' style='display:none;background: #222;width: 130px;border-radius: 3px;'>
+      
+    <div class='legend-title'>Class Key</div>
+    <div class='legend-scale'>
+        <ul class='legend-labels' id = 'the-legend-labels'>
+            <li title = 'Pct area mapped as algal < {PCT_THRESH}%'><span style='background:#00D;'></span>Algal Negative</li>
+            <li title = 'Pct area mapped as algal >= {PCT_THRESH}%'><span style='background:#D00;'></span>Algal Positive</li>
+        </ul>
+    </div>
+    <div class='legend-source'><a href="#link to source"></a></div>
+
+    </div>
+    <script src="https://js.arcgis.com/4.20/"></script>
+    <!-- <script type="text/javascript" src="test.geojson"></script>    -->
+    <script>
+      
+      var geojson = {RAW_GEOJSON};
+
+      require(["esri/Map", "esri/layers/GeoJSONLayer", "esri/views/MapView",
+        "esri/widgets/Legend","esri/widgets/Expand","esri/widgets/BasemapGallery", "esri/widgets/LayerList"], (
+        Map,
+        GeoJSONLayer,
+        MapView,
+        Legend,
+        Expand,
+        BasemapGallery,
+        LayerList
+      ) => {
+        // If GeoJSON files are not on the same domain as your website, a CORS enabled server
+        // or a proxy is required.
+        // const url ="HAB_Mapper_5k_Summaries_OR_yrs2020-2020_mths5-10.geojson";
+        const blob = new Blob([JSON.stringify(geojson)], {
+          type: "application/json"
+        });
+        const url = URL.createObjectURL(blob);
+        
+
+        const template = {
+          title: "{GNIS_Name}, {FORESTNAME}",
+          content: "<hr>Algal blooms were detected {A_Pos_Ct} month(s) from {START_MONTH} to {END_MONTH} of {YEAR_RANGE}.<hr>During this time frame, the highest percentage of water mapped as algal bloom was {A_Ptl_p100}%."
+          
+        };
+
+        const renderer = {
+          type: "simple",
+          symbol: {
+            type: "simple-fill",  // autocasts as new SimpleFillSymbol()
+            color: [ 0, 122, 0, 0.5 ],
+            outline: {  // autocasts as new SimpleLineSymbol()
+              width: 0.3,
+              color: '#DDDDDD'
+            }
+          },
+          visualVariables: [
+            {
+              type: "color",
+              field: "A_Any_Pos",
+              stops: [
+            { value: 0, color: "#0000DD" },
+            { value: 1, color: "#DD0000" }
+          ]
+            }
+          ]
+        };
+    const labelClass = {  // autocasts as new LabelClass()
+                          symbol: {
+                            type: "text",  // autocasts as new TextSymbol()
+                            color: "#B2ECE4",
+                            haloColor:  "#222222",
+                            haloSize: 0.3,
+                            font: {  // autocast as new Font()
+                               family: "Ubuntu Mono",
+                               size: 8,
+                               // weight: "bold"
+                             }
+                          },
+                          // labelPlacement: "above-right",
+                          labelExpressionInfo: {
+                            expression: "$feature.GNIS_Name"
+                          },
+                          // maxScale: 0,
+                          // minScale: 30000000,
+                          
+                        };
+
+        const geojsonLayer = new GeoJSONLayer({
+          url: url,
+          title:"{GEOJSON_TITLE}",
+          copyright: "USDA USFS GTAC",
+          popupTemplate: template,
+          renderer: renderer, //optional
+          labelingInfo: [labelClass],
+          opacity:0.75
+        });
+
+        const map = new Map({
+          basemap: "hybrid",
+          layers: [geojsonLayer]
+        });
+
+        const view = new MapView({
+          container: "viewDiv",
+          map: map
+        });
+
+        geojsonLayer.when(function(){
+          view.extent = geojsonLayer.fullExtent;
+
+
+          //Expand widget
+          const legend = document.getElementById("legend-div");
+          legend.style.display = "block";
+          // $('#legend-div').show();
+          legendExpand = new Expand({
+              expandIconClass: "esri-icon-key",
+              expandTooltip: "Legend",
+              expanded: true,
+              view: view,
+              content: legend
+          });
+           view.ui.add(legendExpand, "bottom-left");
+          var basemapGallery = new Expand({
+            content:new BasemapGallery({
+              view: view
+            }),
+            view:view,
+            expanded :false
+          })
+
+          // Add the widget to the top-right corner of the view
+          view.ui.add(basemapGallery, {
+            position: "top-right"
+          });
+
+          var layerList = new LayerList({
+              view: view,
+              listItemCreatedFunction: function (event) {
+
+                            // The event object contains an item property.
+                            // is is a ListItem referencing the associated layer
+                            // and other properties. You can control the visibility of the
+                            // item, its title, and actions using this object.
+
+                            var item = event.item;
+
+
+
+                            // An array of objects defining actions to place in the LayerList.
+                            // By making this array two-dimensional, you can separate similar
+                            // actions into separate groups with a breaking line.
+
+                            item.actionsSections = [
+
+                                [{
+                                    title: "Increase opacity ",
+                                    className: "esri-icon-up",
+                                    id: "increase-opacity"
+                                }, {
+                                    title: "Decrease opacity",
+                                    className: "esri-icon-down",
+                                    id: "decrease-opacity"
+                                }]
+                            ];
+
+
+                        }
+                    
+            });
+          // Event listener that fires each time an action is triggered
+
+            layerList.on("trigger-action", function (event) {
+                console.log(event)
+                // The layer visible in the view at the time of the trigger.
+                var visibleLayer = event.item.layer;
+
+                //.visible ?
+                //USALayer : censusLayer;
+
+                // Capture the action id.
+                var id = event.action.id;
+
+                if (id === "increase-opacity") {
+
+                    // if the increase-opacity action is triggered, then
+                    // increase the opacity of the GroupLayer by 0.25
+
+                    if (visibleLayer.opacity < 1) {
+                        visibleLayer.opacity += 0.25;
+
+                    }
+                } else if (id === "decrease-opacity") {
+
+                    // if the decrease-opacity action is triggered, then
+                    // decrease the opacity of the GroupLayer by 0.25
+
+                    if (visibleLayer.opacity > 0) {
+                        visibleLayer.opacity -= 0.25;
+                    }
+                }
+            });
+        
+          var bgExpand = new Expand({
+            view: view,
+            content: layerList,
+            expanded :true
+          });
+        
+          // Add the expand instance to the ui
+
+          view.ui.add(bgExpand, "top-left");
+
+          })
+      });
+    </script>
+  </head>
+
+  <body>
+    <div id="viewDiv"></div>
+  </body>
+</html>

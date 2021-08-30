@@ -3,13 +3,13 @@ var app = {};
 //Initial params
 app.availableStates = ['OR','WA','WY'];
 app.selectedState = 'WA';//Available states are OR, WA, and WY
-app.defaultStartYear = 2017;
-app.defaultEndYear = 2020;
-app.defaultStartMonth = 7;
-app.defaultEndMonth = 10;
+app.defaultStartYear = 2021;
+app.defaultEndYear = 2021;
+app.defaultStartMonth = 5;
+app.defaultEndMonth = 9;
 
 app.availableStartYear = 2010;
-app.availableEndYear = 2020;
+app.availableEndYear = 2021;
 app.availableStartMonth = 3;
 app.availableEndMonth = 10;
 
@@ -156,8 +156,10 @@ app.run = function(){
   .filter(ee.Filter.eq('studyAreaName',state)).select([0],['HAB Z-Score'])
   .map(function(img){return img.divide(1000).copyProperties(img,['system:time_start'])})
   .sort('system:time_start');
-
-  var summerWaterMask = z.filter(ee.Filter.calendarRange(7,9,'month')).map(function(img){return img.mask().selfMask()}).count().gt(2).selfMask();
+  // print('Z size:',z.size(),z);
+  
+  var summerWaterMask = z.filter(ee.Filter.calendarRange(5,9,'month')).map(function(img){return img.mask().selfMask()}).count().gt(2).selfMask();
+  // app.map.addLayer(summerWaterMask,{palette:'008'},'Summer water mask')
   z = z.map(function(img){return img.updateMask(summerWaterMask)});
   
   app.zTimeSeries = z;
@@ -188,6 +190,8 @@ app.run = function(){
 /////////////////////////////////////////////////////////
 app.tableQuery = function(event){
   app.chartPanel.clear();
+  app.plotPanel.remove(app.chartInstructions);
+  app.plotPanel.insert(0,app.chartingInProgressLabel);
   var coordsString = ee.String('Lng:').cat(ee.Number(event.lon).format('%.4f')).cat(ee.String(', Lat:')).cat(ee.Number(event.lat).format('%.4f'));
   
   var pt = ee.Geometry.Point([event.lon,event.lat]);
@@ -306,11 +310,13 @@ app.tableQuery = function(event){
       }else{
         app.chartPanel.add(ui.Label('No HAB Z-Score values to chart at location you clicked',{fontSize:'10pt'}));
       }
+      app.plotPanel.remove(app.chartingInProgressLabel);
+      app.plotPanel.insert(0,app.chartInstructions);
+  
     });
   });
    
 
-  
   
   
   
@@ -378,7 +384,9 @@ app.plotPanel = ui.Panel({
 });
 app.legendPanel = ui.Panel(null, null, {position: 'bottom-right',margin:'5px'});
 app.chartPanel = ui.Panel(null, null, {stretch: 'horizontal'});
-app.plotPanel.add(ui.Label('Click on map to chart HAB time series'));
+app.chartInstructions = ui.Label('Click on map to chart HAB time series',{fontWeight:'bold'});
+app.chartingInProgressLabel = ui.Label('Map clicked. Generating charts. This can take some time.',{fontWeight:'bold'});
+app.plotPanel.add(app.chartInstructions);
 
 app.plotPanel.add(app.chartPanel);
 app.plotPanel.add(app.wideBlackline());

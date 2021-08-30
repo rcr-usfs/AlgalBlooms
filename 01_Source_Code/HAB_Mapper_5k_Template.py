@@ -1,3 +1,21 @@
+"""
+   Copyright 2021 Ian Housman, RedCastle Resources Inc.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+"""
+#Script to map algal blooms in Google Earth Engine
+#Intended to work within the geeViz package
+####################################################################################################
 from HAB_Mapper_5k_Lib import *
 ##################################################
 #Specify years to compute statistis (mean and stdDev) for clean lakes
@@ -5,19 +23,19 @@ cleanStartYear = 2019
 cleanEndYear = 2020
 
 #Specify years to map HABs
-analysisStartYear = 2020
-analysisEndYear = 2020
+analysisStartYear = 2021
+analysisEndYear = 2021
 
 #Specify which months to map HABs for
-startMonth = 7
-endMonth = 7
+startMonth = 5
+endMonth = 8
 
 #Location of clean lakes statistics - local path
 stats_json = r'Q:\Algal_detection_GEE_work\HAB_Mapper_5k_Outputs\clean_stats.json'
 
 
 #Export Params
-exportZAndTables = False
+exportZAndTables = True
 
 #GEE Asset folder location for HAB percent summary tables
 hab_summary_table_folder = 'projects/gtac-algal-blooms/assets/outputs/HAB-Summary-Tables'
@@ -30,17 +48,18 @@ crs = 'EPSG:5070'
 transform = [30,0,-2361915.0,0,-30,3177735.0]
 
 #Z score reducer - how to summarize the multiple z scores for a given month
+#If a more conservative depiction of algal blooms is needed, put a lower percentile and visa versa
 reducer = ee.Reducer.percentile([50])
 
 #Z score threshold for identifying HABs (generally 1-3 or so works well) - anything above this z-score is mapped as HAB
 z_thresh = 1
 
-#Indices to use
+#Indices to use 
+#Good choices are NDGI or bloom2
 hab_indices = ['NDGI']
 
-#State study area to map
-# study_area_state = 'Wyoming'
-study_area_stats_key = 'WY'
+#Specify study areas to map
+run_study_area_keys = ['WY','OR','WA']
 
 #Define clean control stats
 clean_lakes = {}
@@ -100,22 +119,28 @@ summary_areas_dict['WY'] = ee.FeatureCollection('projects/gtac-algal-blooms/asse
 #           [-110.0178203886775, 42.793226687150714],
 #           [-109.419065505865, 42.793226687150714],
 #           [-109.419065505865, 43.26704900177293]]], None, False)
-summary_areas = summary_areas_dict[study_area_stats_key]
+# summary_areas = summary_areas_dict[study_area_stats_key]
 ############################################################################
 #Get clean lake stats
 #Will compute them if they do not exist
 # clean_stats = getStats(clean_lakes,cleanStartYear,cleanEndYear,startMonth,endMonth,stats_json,hab_indices)
 
 #Map habs
-# mapHABs(summary_areas,study_area_stats_key,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,study_area_stats_key,reducer,hab_indices,z_thresh,exportZAndTables,hab_summary_table_folder,hab_z_imageCollection,crs,transform)
+# tasks = batchMapHABs(summary_areas_dict,run_study_area_keys,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,reducer,hab_indices,z_thresh,exportZAndTables,hab_summary_table_folder,hab_z_imageCollection,crs,transform)
 
-#Make tables public
+#Wait until tasks are finished
+# tml.trackTasks2(id_list = tasks)
+
+
+#Summarize tables to produce deliverables
+batchSummarizeTables(hab_summary_table_folder,local_hab_summary_table_folder,analysisStartYear,analysisEndYear,startMonth,endMonth,run_study_area_keys)
+
+# #https://code.earthengine.google.com/dcfabfe5b79edd8a4614adec91e17165   
+
+if  not exportZAndTables:
+  Map.view()  
+
+
+#Make table outputs public if needed (for public viewer)
 # makeTablesPublic(hab_summary_table_folder)
 
-#Summarize tables
-summarizeTables(hab_summary_table_folder,local_hab_summary_table_folder,2015,2020,6,9,['WA','OR'])
-
-#https://code.earthengine.google.com/dcfabfe5b79edd8a4614adec91e17165   
-
-# if not exportZAndTables:
-#   Map.view()
