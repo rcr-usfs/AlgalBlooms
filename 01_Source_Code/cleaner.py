@@ -10,11 +10,11 @@ hab_z_imageCollection = 'projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images'
 
 tables = ee.data.listAssets({'parent':hab_summary_table_folder})
 
-# for table in tables['assets']:
+for table in tables['assets']:
   
 #   if table['id'].find('HAB_Summary_Table_yr2021_m8')>-1 and table['id'].find('WY_') == -1:
-#   	print('Deleting: ',table['id'])
-#   	ee.data.deleteAsset(table['id'])
+	print('Deleting: ',table['id'])
+	ee.data.deleteAsset(table['id'])
 
 
 # z_imgs = ee.ImageCollection(hab_z_imageCollection)

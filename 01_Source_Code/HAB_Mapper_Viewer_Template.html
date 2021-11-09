@@ -6,7 +6,8 @@
       name="viewport"
       content="initial-scale=1,maximum-scale=1,user-scalable=no"
     />
-    <title>{TITLE}</title>
+    <link rel="icon" href="https://www.fs.usda.gov/themes/custom/fs_uswds/logo.svg">
+    <title>{TITLE}<</title>
 
     <style>
       html,
@@ -23,6 +24,9 @@
       ul.legend-labels li span { display: block; float: left; height: 14px; width: 25px; margin-right: 5px; margin-left: 0px; }
       .legend-source { font-size: 70%; color: rgb(153, 153, 153); clear: both; }
       a { color: rgb(119, 119, 119); border-radius: 10px; }
+      .legend-box {display:none;background: #222;width: 130px;border-radius: 3px;}
+
+      #info-box {display:none;background: #222;width: 500px;max-height:500;border-radius: 3px;overflow-y: auto;padding-right:20px}
     </style>
 
     <link
@@ -30,34 +34,193 @@
       href="https://js.arcgis.com/4.20/esri/themes/dark/main.css"
     />
 
-    <div id='legend-div' class='my-legend' style='display:none;background: #222;width: 130px;border-radius: 3px;'>
-      
-    <div class='legend-title'>Class Key</div>
-    <div class='legend-scale'>
-        <ul class='legend-labels' id = 'the-legend-labels'>
-            <li title = 'Pct area mapped as algal < {PCT_THRESH}%'><span style='background:#00D;'></span>Algal Negative</li>
-            <li title = 'Pct area mapped as algal >= {PCT_THRESH}%'><span style='background:#D00;'></span>Algal Positive</li>
-        </ul>
-    </div>
-    <div class='legend-source'><a href="#link to source"></a></div>
+    
+    <script src="https://js.arcgis.com/4.20/"></script>
+    <script src="https://rawcdn.githack.com/google/earthengine-api/6127d7196027db31d520825d2b578ec65e4a6ea2/javascript/build/ee_api_js.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+    <script>
+      var authProxyAPIURL = "https://rcr-ee-proxy-2.herokuapp.com";
+      var geeAPIURL = "https://earthengine.googleapis.com";
+      var addLayer;var map;var view;
+      var mapper = new Object();
+      var layerNumber = 1;
+      var layerList = [];
+      var runGEE;
+      var outstandingGEEServiceCount = 0;
+      var palette = ["67001f","b2182b","d6604d","f4a582","fddbc7","d1e5f0","92c5de","4393c3","2166ac","053061"]
+      var paletteList = palette.reverse()
+      palette = paletteList.join(',');
+
+      var negativeColor = '#'+paletteList[0];
+      var positiveColor ='#'+ paletteList[paletteList.length-1];
+
+      var zPctl = {Z_PCTL};
+
+      var showAlgalInfo;
+      if(localStorage.showAlgalInfo == undefined || localStorage.showAlgalInfo == null){
+          localStorage.showAlgalInfo = 'true';
+        }
+      if(localStorage.showAlgalInfo === 'true'){
+          showAlgalInfo = true
+        }else{
+          showAlgalInfo = false
+        }
+      function noShowInfo(){
+        localStorage.showAlgalInfo = !$('#no-show-checkbox').is(':checked')
+      }
+    </script>
+
+    <div id='legend-div' class='my-legend legend-box' >
+      <div class='legend-title'>Class Key</div>
+
+        <div class='legend-scale' id = 'legend-list'>
+          <ul class='legend-labels'>
+              <li><span title = 'All water bodies that fall within USFS lands and/or have USFS recreational facilities' style = 'width:100%;'>USFS Water Bodies</span></li>
+              <li title = 'Pct area mapped as algal (Pixels where the Z-score was > {Z_THRESH}) was < {PCT_THRESH}% for every month from {START_MONTH}-{END_MONTH} of {YEAR_RANGE}'><span style='background:#053061;'></span>Algal Negative</li>
+              <li title = 'Pct area mapped as algal (Pixels where the Z-score was > {Z_THRESH}) was >= {PCT_THRESH}% for any month from {START_MONTH}-{END_MONTH} of {YEAR_RANGE}'><span style='background:#67001f;'></span>Algal Positive</li>
+          </ul>
+        </div>
+
+
+      <div class='legend-source'><a href="#link to source"></a></div>
 
     </div>
-    <script src="https://js.arcgis.com/4.20/"></script>
-    <!-- <script type="text/javascript" src="test.geojson"></script>    -->
-    <script>
+
+    <div id = 'info-box' style = 'display:none;' >
+      
+      <ul>
+        <h2>Web Viewer Information</h2>
+        <li>This web viewer provides a map of waterbodies in {STATES_LIST}. Oregon and Washington outputs consist of waterbodies within 1 mile of a Forest Service recreation site and Wyoming outputs contain all named waterbodies on FS lands.</li>
+        <li>There are two layers in this viewer, 1) USFS Waterbodies which is color coded to show a waterbody’s status as either algal-positive (red) or algal-negative (blue) for any month between {START_MONTH} and {END_MONTH} of {YEAR_RANGE} and 2) Z-Score 80 Pctl which shows more detailed information about the spatial distribution of algal bloom events within a given waterbody.
+        <ul>
+          <li>1)  Any waterbody that shows up as red in the USFS Waterbodies layer had at least {PCT_THRESH}% of its pixels detected as algal blooms during at least one month. Clicking on a waterbody will display more information about when this event occurred.</li>
+
+          <li>2)  The Z-Score {Z_PCTL} Pctl layer shows the {Z_PCTL}th percentile of the z-score of each pixel within the waterbody extent between {START_MONTH} and {END_MONTH} of {YEAR_RANGE} by comparing each lake to a set of alga-negative waterbodies that were determined by local knowledge from each State. This allows for a more detailed examination of each waterbody as it is compared to known algal-negative waterbodies within a State. The {Z_PCTL}th percentile is used to show the maximum value for each pixel, while ignoring any outliers or falsely high numbers.</li>
+        </ul>
+        </li>
+        <hr>
+        <input type="checkbox" id="no-show-checkbox" name="no-show-checkbox" onclick = "noShowInfo()">
+        <label for="no-show-checkbox">Do not automatically show again</label><br><br>
+      </ul>
+    </div>
+
+    <script >
+      if(!showAlgalInfo){$("#no-show-checkbox").prop( "checked", true );}
+
+      function initialize(){
+        ee.initialize(authProxyAPIURL,geeAPIURL,function(){
+        console.log('initialized');
+
+         
+
+        mapper.addLayer = addLayer;
+        // $('#spinner').hide();
+        runGEE();
+        
+        });
+      }
+
       
       var geojson = {RAW_GEOJSON};
 
       require(["esri/Map", "esri/layers/GeoJSONLayer", "esri/views/MapView",
-        "esri/widgets/Legend","esri/widgets/Expand","esri/widgets/BasemapGallery", "esri/widgets/LayerList"], (
+        "esri/widgets/Legend","esri/widgets/Expand","esri/widgets/BasemapGallery", "esri/widgets/LayerList","esri/layers/WebTileLayer"], (
         Map,
         GeoJSONLayer,
         MapView,
         Legend,
         Expand,
         BasemapGallery,
-        LayerList
+        LayerList,
+        WebTileLayer
       ) => {
+
+
+
+          //Add in GEE support
+          addLayer = function(eeImage,vizParams,name,visible){
+          if(vizParams == undefined){vizParams = {}}
+          if(vizParams.addRampToLegend === undefined || vizParams.addRampToLegend === null){vizParams.addRampToLegend = false};
+          if(visible === undefined || visible === null){visible = true};
+          if(name === undefined || name === null){name = 'Layer '+ layerNumber.toString()};
+          if(!vizParams.opacity){vizParams.opacity = 1};
+          if(vizParams.addRampToLegend){
+            outstandingGEEServiceCount++;
+            if(vizParams.labelEnding === undefined || vizParams.labelEnding === null){vizParams.labelEnding = ''}
+            if(vizParams.title === undefined || vizParams.title === null){vizParams.title = ''}
+            var palette = vizParams.palette;
+            var ramp = palette.split(',').map(function(i){return '#'+i}).join(',');
+            // console.log(ramp)
+            $('#legend-list').append(`<ul class='legend-labels' title = '${vizParams.title}'>
+                                      <li><span style = 'width:100%;'>${name}</span></li>
+                                      <li><span style='background:linear-gradient(to right,${ramp});width:100%;'></span></li>
+                                      <li style = 'float:left'>${vizParams.min} ${vizParams.labelEnding}</li>
+                                      <li style = 'float:right'>${vizParams.max} ${vizParams.labelEnding}</li>
+                                      </ul>
+                                      <br>`)
+                                    }
+         
+          var actualOpacity = vizParams.opacity;
+          vizParams.opacity = 1;
+          eeImage.getMap(vizParams,function(m){
+                                    var url = m.urlFormat;
+                                    url = url.replace('{z}','{level}');
+                                    url = url.replace('{x}','{col}');
+                                    url = url.replace('{y}','{row}');
+                                    var eeBaseLayer = new WebTileLayer({
+                                                    urlTemplate: url,
+                                                    id: name,
+                                                    title:name,
+                                                    visible: visible,
+                                                    opacity: actualOpacity ,
+                                                    copyright:'Google Earth Engine|USDA Forest Service' 
+                                                    });
+                                   
+                                    map.layers.add(eeBaseLayer);
+                                    //Set image service to bottom
+                                    map.layers.reorder(eeBaseLayer,0)
+                                    outstandingGEEServiceCount--;
+                                    console.log(outstandingGEEServiceCount)
+                                    if(outstandingGEEServiceCount === 0){
+                                      $('#params-spinner').slideUp()
+                                    }
+                                    
+                                    // layerList.push(eeBaseLayer)
+                                    }
+          );
+         
+          
+          layerNumber ++
+        }
+          
+
+          runGEE = function(){
+            var startMonth = {startMonth};
+            var endMonth = {endMonth};
+            var startYear = {startYear};
+            var endYear = {endYear};
+            var states = {STATES};
+            //Bring in z layers
+            var z = ee.ImageCollection('projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images')
+            .filter(ee.Filter.calendarRange(startYear,endYear,'year'))
+            .filter(ee.Filter.calendarRange(startMonth,endMonth,'month'))
+            .filter(ee.Filter.inList('studyAreaName',states)).select([0],['HAB Z-Score'])
+            .map(function(img){return img.divide(1000).copyProperties(img,['system:time_start'])})
+            .sort('system:time_start');
+
+            //Clean up water mask a bit
+            var summerWaterMask = z.filter(ee.Filter.calendarRange(5,9,'month')).map(function(img){return img.mask().selfMask()}).count().gt(2).selfMask();
+            // app.map.addLayer(summerWaterMask,{palette:'008'},'Summer water mask')
+            z = z.map(function(img){return img.updateMask(summerWaterMask)});
+            
+            
+            
+            addLayer(z.reduce(ee.Reducer.percentile([zPctl])),{'min':-2,'max':2,'palette':palette,'addRampToLegend':true,'labelEnding':'stdDev','title':zPctl.toString()+'th percentile of the Z-Score as compared to a clean set of water bodies of the normalized difference of green and blue over the current extent of surface water mapped from {START_MONTH}-{END_MONTH} of {YEAR_RANGE}.'},'Algal Bloom Z-score',false);
+        
+
+          }
+          
+         initialize();
         // If GeoJSON files are not on the same domain as your website, a CORS enabled server
         // or a proxy is required.
         // const url ="HAB_Mapper_5k_Summaries_OR_yrs2020-2020_mths5-10.geojson";
@@ -88,8 +251,8 @@
               type: "color",
               field: "A_Any_Pos",
               stops: [
-            { value: 0, color: "#0000DD" },
-            { value: 1, color: "#DD0000" }
+            { value: 0, color: negativeColor },
+            { value: 1, color: positiveColor }
           ]
             }
           ]
@@ -117,12 +280,12 @@
 
         const geojsonLayer = new GeoJSONLayer({
           url: url,
-          title:"{GEOJSON_TITLE}",
+          title:"USFS Waterbodies",
           copyright: "USDA USFS GTAC",
           popupTemplate: template,
           renderer: renderer, //optional
           labelingInfo: [labelClass],
-          opacity:0.75
+          opacity:0.95
         });
 
         const map = new Map({
@@ -135,10 +298,12 @@
           map: map
         });
 
+
+          
         geojsonLayer.when(function(){
           view.extent = geojsonLayer.fullExtent;
 
-
+       
           //Expand widget
           const legend = document.getElementById("legend-div");
           legend.style.display = "block";
@@ -151,19 +316,21 @@
               content: legend
           });
            view.ui.add(legendExpand, "bottom-left");
-          var basemapGallery = new Expand({
-            content:new BasemapGallery({
-              view: view
-            }),
-            view:view,
-            expanded :false
-          })
 
-          // Add the widget to the top-right corner of the view
-          view.ui.add(basemapGallery, {
-            position: "top-right"
+           //Expand widget
+          const info = document.getElementById("info-box");
+          info.style.display = "block";
+          // $('#legend-div').show();
+          infoExpand = new Expand({
+              expandIconClass: "esri-icon-question",
+              expandTooltip: "Info",
+              expanded: showAlgalInfo,
+              view: view,
+              content: info
           });
+           view.ui.add(infoExpand, "top-right");
 
+          
           var layerList = new LayerList({
               view: view,
               listItemCreatedFunction: function (event) {
@@ -238,10 +405,23 @@
           });
         
           // Add the expand instance to the ui
-
           view.ui.add(bgExpand, "top-left");
-
+          
+          var basemapGallery = new Expand({
+            content:new BasemapGallery({
+              view: view
+            }),
+            view:view,
+            expanded :false
           })
+
+          // Add the widget to the top-right corner of the view
+          view.ui.add(basemapGallery, {
+            position: "top-left"
+          });
+
+          });
+
       });
     </script>
   </head>

@@ -156,18 +156,18 @@ def getStats(studyAreas,startYear,endYear,startMonth,endMonth,stats_json,bands =
   # Map.addLayer(clean_composite,getImagesLib.vizParamsFalse,'Clean Lakes Composite')
 	
 ############################################################################
-def batchMapHABs(summary_areas_dict,study_area_stats_keys,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,reducer = ee.Reducer.percentile([50]),bands = ['bloom2','NDGI'],z_thresh = 1,exportZAndTables = False,hab_summary_table_folder = 'projects/gtac-algal-blooms/assets/outputs/HAB-Summary-Tables',hab_z_imageCollection = 'projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images',crs = 'EPSG:5070',transform = [30,0,-2361915.0,0,-30,3177735.0]):
+def batchMapHABs(summary_areas_dict,study_area_stats_keys,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,reducer = ee.Reducer.percentile([50]),bands = ['bloom2','NDGI'],z_threshs = [1],exportZAndTables = False,hab_summary_table_folder = 'projects/gtac-algal-blooms/assets/outputs/HAB-Summary-Tables',hab_z_imageCollection = 'projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images',crs = 'EPSG:5070',transform = [30,0,-2361915.0,0,-30,3177735.0]):
   task_list = []
   for study_area_stats_key in study_area_stats_keys:
     summary_areas = summary_areas_dict[study_area_stats_key]
-    tasks = mapHABs(summary_areas,study_area_stats_key,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,study_area_stats_key,reducer,bands,z_thresh,exportZAndTables,hab_summary_table_folder,hab_z_imageCollection,crs,transform)
+    tasks = mapHABs(summary_areas,study_area_stats_key,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,study_area_stats_key,reducer,bands,z_threshs,exportZAndTables,hab_summary_table_folder,hab_z_imageCollection,crs,transform)
     task_list.extend(tasks)
   return task_list
 ############################################################################
 #Function to map algal blooms
 #These aren't always harmful
 #This function produces a raster z score of algal bloom and a summary table
-def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,stats_sa,reducer = ee.Reducer.percentile([50]),bands = ['bloom2','NDGI'],z_thresh = 1,exportZAndTables = False,hab_summary_table_folder = 'projects/gtac-algal-blooms/assets/outputs/HAB-Summary-Tables',hab_z_imageCollection = 'projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images',crs = 'EPSG:5070',transform = [30,0,-2361915.0,0,-30,3177735.0]):
+def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,stats_sa,reducer = ee.Reducer.percentile([50]),bands = ['bloom2','NDGI'],z_threshs = [1],exportZAndTables = False,hab_summary_table_folder = 'projects/gtac-algal-blooms/assets/outputs/HAB-Summary-Tables',hab_z_imageCollection = 'projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images',crs = 'EPSG:5070',transform = [30,0,-2361915.0,0,-30,3177735.0]):
 
   #Set up output areas and dates
   try:
@@ -251,10 +251,16 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
       dirty_z = dirty_zs.reduce(reducer).reduce(ee.Reducer.max())
 
       #Threshold hab/not hab
-      hab = dirty_z.gte(z_thresh).rename(['HAB_Pct'])
+      hab = dirty_z.gte(z_threshs)
+      bns = hab.bandNames()
+      # print('here')
+      bns = list(map(lambda z:'AB_Pct_Z_' + f'{int(z*100):03}' ,z_threshs))
+      # print('bns:',bns)
+      hab = hab.rename(bns)
+      # print(hab.bandNames().getInfo())
 
       Map.addLayer(dirty_z,{'min':0,'max':2,'palette':'00F,0F0,F00'},'Dirty Z yr{} m{}'.format(analysisYear,month),False)
-      Map.addLayer(hab,{'min':0,'max':1,'palette':'00F,F00','classLegendDict':{'Not HAB':'00F','HAB':'F00'}},'HAB yr{} m{}'.format(analysisYear,month),False)
+      Map.addLayer(hab,{'min':0,'max':1,'classLegendDict':{'Not HAB':'00F','HAB':'F00'}},'AB yr{} m{}'.format(analysisYear,month),False)
       
       #Function to convert to pct of an area as hab
       def toPct(f,inField,outField):
@@ -270,13 +276,22 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
 
         #Summarize the pct of each area mapped as algal bloom
         summary_table = hab.reduceRegions(summaryAreas, ee.Reducer.fixedHistogram(0, 2, 2), None, crs, transform, 4)
-        summary_table = summary_table.filter(ee.Filter.notNull(['histogram']))
-        summary_table = summary_table.map(lambda i:toPct(i,'histogram','Pct_HAB'))
+        if len(z_threshs) == 1:
+          summary_table = summary_table.filter(ee.Filter.notNull(['histogram']))
+          summary_table = summary_table.map(lambda i:toPct(i,'histogram',bns[0]))
         
+        else:
+          for bn in bns:
+            summary_table = summary_table.filter(ee.Filter.notNull([bn]))
+            summary_table = summary_table.map(lambda i:toPct(i,bn,bn))
+
         #Summarize the pct of each area mapped as water
         summary_table = waterMask.reduceRegions(summary_table, ee.Reducer.fixedHistogram(0, 2, 2), None, crs, transform, 4)
         summary_table = summary_table.map(lambda i:toPct(i,'histogram','Pct_Water'))
         
+        summary_table = dirty_z.reduceRegions(summary_table, ee.Reducer.mean(), None, crs, transform, 4)
+        summary_table = summary_table.map(lambda f: f.set('AB_Mean_Z',f.get('mean')))
+    
         #Export output table
         output_table_name = '{}_HAB_Summary_Table_yr{}_m{}'.format(studyAreaName,analysisYear,month)
         output_z_name = '{}_HAB_Z_yr{}_m{}'.format(studyAreaName,analysisYear,month)
@@ -286,26 +301,26 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
                   assetId=hab_summary_table_folder + '/'+output_table_name)
         t.start()
        
-        #Set up the z score raster for export and export it
-        dirty_z_for_export = dirty_z.multiply(1000).int16().set({'system:time_start':ee.Date.fromYMD(analysisYear,month,1).millis(),
-                                                                  'year':analysisYear,
-                                                                  'month':month,
-                                                                  'studyAreaName':studyAreaName,
-                                                                  'zThresh':z_thresh})
-        # task_list.append(output_z_name)
-        t = ee.batch.Export.image.toAsset(dirty_z_for_export.clip(saBounds), 
-                      description = output_z_name, 
-                      assetId = hab_z_imageCollection + '/'+ output_z_name, 
-                      pyramidingPolicy = {'.default':'mean'}, 
-                      dimensions = None, 
-                      region = None, 
-                      scale = None, 
-                      crs = crs, 
-                      crsTransform = transform, 
-                      maxPixels = 1e13)
-        print('Exporting:',output_z_name)
-        print(t)
-        t.start()
+  #       #Set up the z score raster for export and export it
+  #       dirty_z_for_export = dirty_z.multiply(1000).int16().set({'system:time_start':ee.Date.fromYMD(analysisYear,month,1).millis(),
+  #                                                                 'year':analysisYear,
+  #                                                                 'month':month,
+  #                                                                 'studyAreaName':studyAreaName,
+  #                                                                 'zThresh':z_thresh})
+  #       # task_list.append(output_z_name)
+  #       t = ee.batch.Export.image.toAsset(dirty_z_for_export.clip(saBounds), 
+  #                     description = output_z_name, 
+  #                     assetId = hab_z_imageCollection + '/'+ output_z_name, 
+  #                     pyramidingPolicy = {'.default':'mean'}, 
+  #                     dimensions = None, 
+  #                     region = None, 
+  #                     scale = None, 
+  #                     crs = crs, 
+  #                     crsTransform = transform, 
+  #                     maxPixels = 1e13)
+  #       print('Exporting:',output_z_name)
+  #       print(t)
+  #       t.start()
   return task_list
      
 ############################################################################
@@ -321,21 +336,25 @@ def limitThreads(limit):
   while threading.activeCount() > limit:
     time.sleep(1)
     print(threading.activeCount(),'threads running')
-def batchSummarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMonth,endMonth,summary_areas_dict,states = ['WA','OR'],pct_HAB_threshold = 5,unique_area_field = 'UNID',viewer_template = 'HAB_Mapper_Viewer_Template.html'):
-  for state in states:
-    tt = threading.Thread(target = summarizeTables, args = (input_table_dir,output_table_dir,startYear,endYear,startMonth,endMonth,summary_areas_dict,[state],pct_HAB_threshold,unique_area_field,viewer_template))
-    tt.start()
-    time.sleep(0.1)
+
+#Function to summarize output algal bloom tables over multiple stats and z thresholds simultaneously
+def batchSummarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMonth,endMonth,summary_areas_dict,states = ['WA','OR'],z_threshs = [1],pct_HAB_threshold = 5,unique_area_field = 'UNID',viewer_template = 'HAB_Mapper_Viewer_Template.html'):
+  for z_thresh in z_threshs:
+    for state in states:
+      tt = threading.Thread(target = summarizeTables, args = (input_table_dir,output_table_dir,startYear,endYear,startMonth,endMonth,summary_areas_dict,[state],z_thresh,pct_HAB_threshold,unique_area_field,viewer_template))
+      tt.start()
+      time.sleep(0.1)
+      limitThreads(4)
   limitThreads(1)
-
-
 ###############################################################
 #Simplify tables
-def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMonth,endMonth,summary_areas_dict,states = ['WA','OR'],pct_HAB_threshold = 5,unique_area_field = 'UNID',viewer_template = 'HAB_Mapper_Viewer_Template.html'):
+def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMonth,endMonth,summary_areas_dict,states = ['WA','OR'],z_thresh = 1,pct_HAB_threshold = 5,unique_area_field = 'UNID',viewer_template = 'HAB_Mapper_Viewer_Template.html'):
   #Potential fields available
   # keep_fields = ['ADMINFORES', 'AreaSqKm', 'DISTRICTNA', 'DISTRICTNU', 'DISTRICTOR', 'Elevation', 'FCode', 'FDate', 'FID_FS_Bou', 'FID_S_USA_', 'FID_WA_FS_', 'FID_WA_Nam', 'FORESTNAME', 'FORESTNUMB', 'FORESTORGC', 'FType', 'GIS_ACRES', 'GIS_ACRE_1', 'GNIS_ID', 'GNIS_Name', 'OBJECTID', 'Permanent_', 'RANGERDIST', 'REGION', 'REGION_1', 'ReachCode', 'Resolution', 'SHAPE_AR_1', 'SHAPE_LEN', 'SHAPE__Are', 'SHAPE__Len', 'Shape_Area', 'Shape_Leng', 'Visibility', 'state']
   #Specify which fields are kept in the summarized table
   keep_fields = ['UNID','state','REGION','FORESTNAME','GNIS_Name']
+
+  state_dict = {'WA':'Washington','OR':'Oregon','WY':'Wyoming'}
 
   month_dict = {1:'January',2:'February',3:'March',4:'April',5:'May',6:'June',7:'July',8:'August',9:'September',10:'October',11:'November',12:'December'}
 
@@ -354,6 +373,8 @@ def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMont
   tables = [i for i in tables if int(i.split('/')[-1].split('_yr')[-1].split('_')[0]) in years]
   tables = [i for i in tables if int(i.split('/')[-1].split('_m')[-1]) in months]
   
+  z_thresh_padded =  f'{int(z_thresh*100):03}' 
+  ab_field = 'AB_Pct_Z_' +z_thresh_padded
   #Handle creating a unid to summarize across
   #Currently Wyoming has a different pair of fields needed than WA and
   def getUNID(t,state):
@@ -369,8 +390,8 @@ def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMont
     state = table_name.split('/')[-1].split('_')[0]
     f = f.map(lambda ft: ft.set({'state':state}))
     f = f.map(lambda t:getUNID(t,state))
-    f = f.map(lambda t: t.set('is_hab',ee.Number(t.get('Pct_HAB')).gt(pct_HAB_threshold)))
-    f = f.map(lambda t: t.set('is_not_hab',ee.Number(t.get('Pct_HAB')).lte(pct_HAB_threshold)))
+    f = f.map(lambda t: t.set('is_hab',ee.Number(t.get(ab_field)).gt(pct_HAB_threshold)))
+    f = f.map(lambda t: t.set('is_not_hab',ee.Number(t.get(ab_field)).lte(pct_HAB_threshold)))
 
     # n_featues = f.size().getInfo()
     # n_unids = f.aggregate_histogram('UNID').keys().length().getInfo()
@@ -384,7 +405,7 @@ def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMont
   
   
   #Read in state study areas for getting geometry from and add UNID
-  print('Reading in summary info spatial info')
+  print('Reading in summary area spatial info')
   study_areas = list(map(lambda s:ee.FeatureCollection(summary_areas_dict[s]).map(lambda f:getUNID(f,s)),states))
   study_areas = ee.FeatureCollection(study_areas).flatten()
 
@@ -398,11 +419,11 @@ def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMont
   #Summarize all the tables using several fields and reducers
   print('Summarizing tables')
   stats = tables.reduceColumns(**{
-    'selectors': ['UNID','is_hab','is_not_hab','Pct_HAB','Pct_Water'],
+    'selectors': ['UNID','is_hab','is_not_hab',ab_field,'AB_Mean_Z','Pct_Water'],
     'reducer':ee.Reducer.max()
     .combine(ee.Reducer.sum(),None,True)
     .combine(ee.Reducer.mean(),None,True)
-    .repeat(4)
+    .repeat(5)
     .group(**{
       'groupField': 0,
       'groupName': 'UNID',
@@ -417,15 +438,17 @@ def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMont
     is_hab = ee.Number(max.get(0)).byte()
     pos_ct = ee.Number(sum.get(0)).byte()
     neg_ct = ee.Number(sum.get(1)).byte()
-    pct_water = ee.Number(mean.get(3)).format('%.2f')
+    pct_water = ee.Number(mean.get(4)).format('%.2f')
     max_pct_hab = ee.Number(max.get(2)).format('%.2f')
+    max_mean_z = ee.Number(max.get(3)).format('%.2f')
     out_dict = ee.Dictionary({
       'UNID':stat.get('UNID'),
       'A_Any_Pos':is_hab,
       'A_Pos_Ct':pos_ct,
       'A_Neg_Ct':neg_ct,
       'Pct_Water':pct_water,
-      'A_Max_Pct':max_pct_hab
+      'A_Max_Pct':max_pct_hab,
+      'A_Max_Zmean':max_mean_z
       })
     return out_dict
 
@@ -446,7 +469,7 @@ def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMont
   tables_json['features'] = out_geo
 
 
-  out_name = os.path.join(output_table_dir,'Algal_Bloom_Summaries_{}_yrs{}-{}_mths{}-{}'.format('-'.join(states),startYear,endYear,startMonth,endMonth))
+  out_name = os.path.join(output_table_dir,'Algal_Bloom_Summaries_{}_yrs{}-{}_mths{}-{}_zthresh{}'.format('-'.join(states),startYear,endYear,startMonth,endMonth,z_thresh_padded))
 
   print('Writing final outputs')
   #Write out combined geojson
@@ -482,13 +505,31 @@ def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMont
   else:
     year_range_string = 'years {} to {}'.format(startYear,endYear)
 
+  if len(states) == 1:
+    states_list_string = state_dict[states[0]]
+
+  elif len(states) == 2:
+    states_list_string = state_dict[states[0]] + ' and ' + state_dict[states[1]]
+
+  else:
+    states_list_string = ', '.join([state_dict[i] for i in states[:-1]]) + ', and '+ state_dict[states[-1]]
+   
+
   replace_dict = {'{TITLE}':title,
                   '{RAW_GEOJSON}':json.dumps(tables_json),
                   '{START_MONTH}':month_dict[startMonth],
                   '{END_MONTH}':month_dict[endMonth],
                   '{YEAR_RANGE}':year_range_string,
+                  '{startYear}':str(startYear),
+                  '{endYear}':str(endYear),
+                  '{startMonth}':str(startMonth),
+                  '{endMonth}':str(endMonth),
+                  '{STATES}':str(states),
                   '{PCT_THRESH}':str(pct_HAB_threshold),
-                  '{GEOJSON_TITLE}':geojson_title
+                  '{GEOJSON_TITLE}':'geojson_title',
+                  '{Z_THRESH}':str(z_thresh),
+                  '{Z_PCTL}':'80',
+                  '{STATES_LIST}':states_list_string
                   }
 
   mew.setup_viewer(out_name_html, replace_dict, viewer_template)

@@ -53,14 +53,17 @@ transform = [30,0,-2361915.0,0,-30,3177735.0]
 #If a more conservative depiction of algal blooms is needed, put a lower percentile and visa versa
 reducer = ee.Reducer.percentile([50])
 
-#Z score threshold for identifying HABs (generally 1-3 or so works well) - anything above this z-score is mapped as HAB
-z_thresh = 1
+#Z score thresholds for identifying HABs (generally 1-3 or so works well) - anything above this z-score is mapped as HAB
+#This must be a list. It is intended to handle multiple thresholds to produce multiple fields in the summary tables
+#E.g. If you'd like to threshold at 0.5 and 1 standard deviation, specify [0.5,1]
+z_threshs = [0.75]#[0.3,0.5,0.75,1,1.5,2]
 
 #Indices to use 
 #Good choices are NDGI or bloom2
 hab_indices = ['NDGI']
 
 #Specify study areas to map
+#Current choices are 'OR','WA',or 'WY'
 run_study_area_keys = ['OR','WA','WY']
 
 #Define clean control stats
@@ -128,19 +131,20 @@ summary_areas_dict['WY'] = ee.FeatureCollection('projects/gtac-algal-blooms/asse
 #Will compute them if they do not exist
 # clean_stats = getStats(clean_lakes,cleanStartYear,cleanEndYear,startMonth,endMonth,stats_json,hab_indices)
 
-#Map habs
-# tasks = batchMapHABs(summary_areas_dict,run_study_area_keys,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,reducer,hab_indices,z_thresh,exportZAndTables,hab_summary_table_folder,hab_z_imageCollection,crs,transform)
+# #Map habs
+# tasks = batchMapHABs(summary_areas_dict,run_study_area_keys,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,reducer,hab_indices,z_threshs,exportZAndTables,hab_summary_table_folder,hab_z_imageCollection,crs,transform)
 
-#Wait until tasks are finished
+# #Wait until tasks are finished
 # tml.trackTasks2(id_list = tasks)
 
 #####################################################
 #Summarize tables to produce deliverables
 #Use this to create individual state summaries
-batchSummarizeTables(hab_summary_table_folder,local_hab_summary_table_folder,analysisStartYear,analysisEndYear,startMonth,endMonth,summary_areas_dict,run_study_area_keys)
+# batchSummarizeTables(hab_summary_table_folder,local_hab_summary_table_folder,analysisStartYear,analysisEndYear,startMonth,endMonth,summary_areas_dict,run_study_area_keys,z_threshs)
 
-#Use this to summarize all specified states at once
-summarizeTables(hab_summary_table_folder,local_hab_summary_table_folder,analysisStartYear,analysisEndYear,startMonth,endMonth,summary_areas_dict,run_study_area_keys)
+# #Use this to summarize all specified states at once
+for z_thresh in z_threshs:
+  summarizeTables(hab_summary_table_folder,local_hab_summary_table_folder,analysisStartYear,analysisEndYear,startMonth,endMonth,summary_areas_dict,run_study_area_keys,z_thresh)
 
 #####################################################
 if  not exportZAndTables:
