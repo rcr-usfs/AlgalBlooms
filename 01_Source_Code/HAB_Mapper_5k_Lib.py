@@ -498,9 +498,10 @@ def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMont
  
   geojson_title = title
   title = title + ' Viewer'
+  # print('Theyre equal:',startYear==endYear)
   if startYear == endYear:
     year_range_string = '{}'.format(startYear)
-  if endYear - startYear == 1:
+  elif endYear - startYear == 1:
     year_range_string = '{} and {}'.format(startYear,endYear)
   else:
     year_range_string = 'years {} to {}'.format(startYear,endYear)

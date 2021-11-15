@@ -91,11 +91,11 @@
       <ul>
         <h2>Web Viewer Information</h2>
         <li>This web viewer provides a map of waterbodies in {STATES_LIST}. Oregon and Washington outputs consist of waterbodies within 1 mile of a Forest Service recreation site and Wyoming outputs contain all named waterbodies on FS lands.</li>
-        <li>There are two layers in this viewer, 1) USFS Waterbodies which is color coded to show a waterbody’s status as either algal-positive (red) or algal-negative (blue) for any month between {START_MONTH} and {END_MONTH} of {YEAR_RANGE} and 2) Z-Score 80 Pctl which shows more detailed information about the spatial distribution of algal bloom events within a given waterbody.
+        <li>There are two layers in this viewer, 1) USFS Waterbodies and 2) Algal Bloom Z-Score which are described below:
         <ul>
-          <li>1)  Any waterbody that shows up as red in the USFS Waterbodies layer had at least {PCT_THRESH}% of its pixels detected as algal blooms during at least one month. Clicking on a waterbody will display more information about when this event occurred.</li>
+          <li>1. USFS Waterbodies is color coded to show a waterbody’s status as either algal-positive (red) or algal-negative (blue) for any month between {START_MONTH} and {END_MONTH} of {YEAR_RANGE}. Any waterbody that shows up as red in the USFS Waterbodies layer had at least {PCT_THRESH}% of its pixels detected as algal blooms during at least one month. Clicking on a waterbody will display more information about when this event occurred.</li>
 
-          <li>2)  The Z-Score {Z_PCTL} Pctl layer shows the {Z_PCTL}th percentile of the z-score of each pixel within the waterbody extent between {START_MONTH} and {END_MONTH} of {YEAR_RANGE} by comparing each lake to a set of alga-negative waterbodies that were determined by local knowledge from each State. This allows for a more detailed examination of each waterbody as it is compared to known algal-negative waterbodies within a State. The {Z_PCTL}th percentile is used to show the maximum value for each pixel, while ignoring any outliers or falsely high numbers.</li>
+          <li>2. The Algal Bloom Z-Score layer shows more detailed information about the spatial distribution of algal bloom events within all waterbodies in each state. By comparing each waterbody to a set of algal-negative lakes, the {Z_PCTL}th percentile of z-scores for each pixel, between {START_MONTH} and {END_MONTH} of {YEAR_RANGE}, is used to show the maximum algal bloom z-score value, while ignoring outliers and falsely high numbers.</li>
         </ul>
         </li>
         <hr>
