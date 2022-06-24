@@ -27,6 +27,8 @@
       .legend-box {display:none;background: #222;width: 130px;border-radius: 3px;}
 
       #info-box {display:none;background: #222;width: 500px;max-height:500;border-radius: 3px;overflow-y: auto;padding-right:20px}
+
+      hover.algal-troll {display: block;}
     </style>
 
     <link
@@ -77,7 +79,7 @@
           <ul class='legend-labels'>
               <li><span title = 'All water bodies that fall within USFS lands and/or have USFS recreational facilities' style = 'width:100%;'>USFS Water Bodies</span></li>
               <li title = 'Pct area mapped as algal (Pixels where the Z-score was > {Z_THRESH}) was < {PCT_THRESH}% for every month from {START_MONTH}-{END_MONTH} of {YEAR_RANGE}'><span style='background:#053061;'></span>Algal Negative</li>
-              <li title = 'Pct area mapped as algal (Pixels where the Z-score was > {Z_THRESH}) was >= {PCT_THRESH}% for any month from {START_MONTH}-{END_MONTH} of {YEAR_RANGE}'><span style='background:#67001f;'></span>Algal Positive</li>
+              <li title = 'Pct area mapped as algal (Pixels where the Z-score was > {Z_THRESH}) was >= {PCT_THRESH}% for any month from {START_MONTH}-{END_MONTH} of {YEAR_RANGE}'><span style='background:#67001f;'></span>Algal Positive<img class = 'algal-troll' style = 'display:none;' height = '50px' src="https://www.aquasana.com/on/demandware.static/-/Sites-aquasana-Library/default/images/blog/2019/01/algalBloom_body1.jpg"></li>
           </ul>
         </div>
 
@@ -89,6 +91,7 @@
     <div id = 'info-box' style = 'display:none;' >
       
       <ul>
+
         <h2>Web Viewer Information</h2>
         <li>This web viewer provides a map of waterbodies in {STATES_LIST}. Oregon and Washington outputs consist of waterbodies within 1 mile of a Forest Service recreation site and Wyoming outputs contain all named waterbodies on FS lands.</li>
         <li>There are two layers in this viewer, 1) USFS Waterbodies and 2) Algal Bloom Z-Score which are described below:

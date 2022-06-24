@@ -41,7 +41,7 @@ preComputedLandsatTDOMIRStdDev = preComputedTDOMStats['landsat']['stdDev']
 
 preComputedSentinel2TDOMIRMean = preComputedTDOMStats['sentinel2']['mean']
 preComputedSentinel2TDOMIRStdDev = preComputedTDOMStats['sentinel2']['stdDev']
-
+############################################################################
 ############################################################################
 #On-the-fly basic water masking method
 #This method is used to provide a time-sensitive water mask
@@ -91,47 +91,88 @@ def getStats(studyAreas,startYear,endYear,startMonth,endMonth,stats_json,bands =
   for studyArea in list(studyAreas.keys()):
     
     sa = studyAreas[studyArea]
+    try:
+      saBounds = sa.geometry().bounds()
+    except:
+      saBounds = sa.bounds()
+    Map.addLayer(sa,{},studyArea + ' outline',False)
+    Map.addLayer(saBounds,{},studyArea + ' bounds',False)
     for month in range(startMonth,endMonth+1):
 
       sa_month_key = '{}_{}'.format(studyArea,month)
       if sa_month_key not in out_stats.keys():
         print(studyArea,month)
-        #Get water bodies and convert them to a vector to compute stats within
-        water_mask = getWaterMask(startYear,endYear,startMonth,endMonth).selfMask()
-        clean_lakes = water_mask.clip(sa).reduceToVectors(scale = 30)
-        Map.addLayer(clean_lakes,{},'Clean Lakes {} {}'.format(studyArea,month))
-        try:
-          saBounds = sa.geometry().bounds()
-        except:
-          saBounds = sa.bounds()
+     
 
         startJulian = int(ee.Date.fromYMD(2003,month,1).format('DD').getInfo())
         endJulian = int(ee.Date.fromYMD(2003,month,1).advance(1,'month').advance(-1,'day').format('DD').getInfo())
         
         #Get Landsat and Sentinel 2 images
-        clean_imgs = getImagesLib.getProcessedLandsatAndSentinel2Scenes(
-        	saBounds,
-        	startYear,
-        	endYear,
-        	startJulian,
-        	endJulian,
-          includeSLCOffL7 = True,
-          convertToDailyMosaics = True,
-          landsatResampleMethod = 'bicubic',
-          sentinel2ResampleMethod = 'bicubic',
-        	preComputedLandsatCloudScoreOffset = preComputedLandsatCloudScoreOffset,
-        	preComputedSentinel2CloudScoreOffset=preComputedSentinel2CloudScoreOffset,
-        	preComputedLandsatTDOMIRMean = preComputedLandsatTDOMIRMean,
-        	preComputedLandsatTDOMIRStdDev=preComputedLandsatTDOMIRStdDev,
-        	preComputedSentinel2TDOMIRMean=preComputedSentinel2TDOMIRMean,
-        	preComputedSentinel2TDOMIRStdDev=preComputedSentinel2TDOMIRStdDev)
+        # clean_imgs = getImagesLib.getProcessedLandsatAndSentinel2Scenes(
+        # 	saBounds,
+        # 	startYear,
+        # 	endYear,
+        # 	startJulian,
+        # 	endJulian,
+        #   includeSLCOffL7 = True,
+        #   convertToDailyMosaics = True,
+        #   landsatResampleMethod = 'bicubic',
+        #   sentinel2ResampleMethod = 'bicubic',
+        # 	preComputedLandsatCloudScoreOffset = preComputedLandsatCloudScoreOffset,
+        # 	preComputedSentinel2CloudScoreOffset=preComputedSentinel2CloudScoreOffset,
+        # 	preComputedLandsatTDOMIRMean = preComputedLandsatTDOMIRMean,
+        # 	preComputedLandsatTDOMIRStdDev=preComputedLandsatTDOMIRStdDev,
+        # 	preComputedSentinel2TDOMIRMean=preComputedSentinel2TDOMIRMean,
+        # 	preComputedSentinel2TDOMIRStdDev=preComputedSentinel2TDOMIRStdDev)
         
+        clean_imgs = getImagesLib.getProcessedSentinel2Scenes(\
+            saBounds,
+            startYear,
+            endYear,
+            startJulian,
+            endJulian,
+            applyQABand = False,
+            applyCloudScore = False,
+            applyShadowShift = False,
+            applyTDOM = True,
+            cloudScoreThresh = 20,
+            performCloudScoreOffset = True,
+            cloudScorePctl = 10,
+            cloudHeights = ee.List.sequence(500,10000,500),
+            zScoreThresh = -1,
+            shadowSumThresh = 0.35,
+            contractPixels = 1.5,
+            dilatePixels = 3.5,
+            shadowSumBands = ['nir','swir1'],
+            resampleMethod = 'aggregate',
+            toaOrSR = 'TOA',
+            convertToDailyMosaics = False,
+            applyCloudProbability = True,
+            preComputedCloudScoreOffset = preComputedSentinel2CloudScoreOffset,
+            preComputedTDOMIRMean = preComputedSentinel2TDOMIRMean,
+            preComputedTDOMIRStdDev = preComputedSentinel2TDOMIRStdDev,
+            cloudProbThresh = 40)
+
         #Reduce to a median composite
-        clean_composite = clean_imgs.map(getImagesLib.HoCalcAlgorithm2).median()
+        clean_imgs = clean_imgs.map(getImagesLib.HoCalcAlgorithm2)
+        clean_composite = clean_imgs.median()
 
+
+
+           #Get water bodies and convert them to a vector to compute stats within
+        water_mask = getWaterMask(startYear,endYear,startMonth,endMonth).selfMask()
+        # water_mask = simpleWaterMask(clean_composite).selfMask()
+        Map.addLayer(clean_composite,getImagesLib.vizParamsFalse,'Clean Composite {} {}'.format(studyArea,month),False)
+        
+        clean_composite = clean_composite.updateMask(water_mask).select(bands)
+
+        Map.addLayer(clean_composite,{'min':-0.2,'max':0.2,'palette':'00D,DDD,0D0'},'Selected Bands {} {}'.format(studyArea,month),False)
+        # clean_lakes = gtacWaterMask.clip(sa).reduceToVectors(scale = 30)
+        Map.addLayer(water_mask.clip(sa),{'palette':'00D'},'Clean Lakes {} {}'.format(studyArea,month))
+        
         #Compute zonal stats (mean and stdDev) within water areas
-        clean_stats = clean_composite.select(bands).reduceRegion(ee.Reducer.mean().combine(ee.Reducer.stdDev(),'',True),sa,None,crs,transform,True,1e13)
-
+        clean_stats = clean_composite.clip(sa).reduceRegion(ee.Reducer.mean().combine(ee.Reducer.stdDev(),'',True),saBounds,None,crs,transform,True,1e13)
+  
         #Convert to local json
         stats = None
         tryCount = 1
@@ -153,7 +194,7 @@ def getStats(studyAreas,startYear,endYear,startMonth,endMonth,stats_json,bands =
       o.write(json.dumps(out_stats))
       o.close()
   return out_stats
-  # Map.addLayer(clean_composite,getImagesLib.vizParamsFalse,'Clean Lakes Composite')
+
 	
 ############################################################################
 def batchMapHABs(summary_areas_dict,study_area_stats_keys,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,reducer = ee.Reducer.percentile([50]),bands = ['bloom2','NDGI'],z_threshs = [1],exportZAndTables = False,hab_summary_table_folder = 'projects/gtac-algal-blooms/assets/outputs/HAB-Summary-Tables',hab_z_imageCollection = 'projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images',crs = 'EPSG:5070',transform = [30,0,-2361915.0,0,-30,3177735.0]):
@@ -184,24 +225,53 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
   print(analysisStartYear,analysisEndYear,startMonth,endMonth, startJulian,endJulian)
   
   #Get Landsat and Sentinel 2 images
-  dirty_imgs = getImagesLib.getProcessedLandsatAndSentinel2Scenes(
+  # dirty_imgs = getImagesLib.getProcessedLandsatAndSentinel2Scenes(
+  #   saBounds,
+  #   analysisStartYear,
+  #   analysisEndYear,
+  #   startJulian,
+  #   endJulian,
+  #   includeSLCOffL7 = True,
+  #   convertToDailyMosaics = True,
+  #   landsatResampleMethod = 'bicubic',
+  #   sentinel2ResampleMethod = 'bicubic',
+  #   applyTDOMLandsat = True,
+  #   applyTDOMSentinel2 = True,
+  #   preComputedLandsatCloudScoreOffset = preComputedLandsatCloudScoreOffset,
+  #   preComputedSentinel2CloudScoreOffset=preComputedSentinel2CloudScoreOffset,
+  #   preComputedLandsatTDOMIRMean = preComputedSentinel2TDOMIRMean,
+  #   preComputedLandsatTDOMIRStdDev=preComputedSentinel2TDOMIRStdDev,
+  #   preComputedSentinel2TDOMIRMean=preComputedSentinel2TDOMIRMean,
+  #   preComputedSentinel2TDOMIRStdDev=preComputedSentinel2TDOMIRStdDev)
+
+  dirty_imgs = getImagesLib.getProcessedSentinel2Scenes(\
     saBounds,
     analysisStartYear,
     analysisEndYear,
     startJulian,
     endJulian,
-    includeSLCOffL7 = True,
-    convertToDailyMosaics = True,
-    landsatResampleMethod = 'bicubic',
-    sentinel2ResampleMethod = 'bicubic',
-    applyTDOMLandsat = True,
-    applyTDOMSentinel2 = True,
-    preComputedLandsatCloudScoreOffset = preComputedLandsatCloudScoreOffset,
-    preComputedSentinel2CloudScoreOffset=preComputedSentinel2CloudScoreOffset,
-    preComputedLandsatTDOMIRMean = preComputedSentinel2TDOMIRMean,
-    preComputedLandsatTDOMIRStdDev=preComputedSentinel2TDOMIRStdDev,
-    preComputedSentinel2TDOMIRMean=preComputedSentinel2TDOMIRMean,
-    preComputedSentinel2TDOMIRStdDev=preComputedSentinel2TDOMIRStdDev)
+    applyQABand = False,
+    applyCloudScore = False,
+    applyShadowShift = False,
+    applyTDOM = True,
+    cloudScoreThresh = 20,
+    performCloudScoreOffset = True,
+    cloudScorePctl = 10,
+    cloudHeights = ee.List.sequence(500,10000,500),
+    zScoreThresh = -1,
+    shadowSumThresh = 0.35,
+    contractPixels = 1.5,
+    dilatePixels = 3.5,
+    shadowSumBands = ['nir','swir1'],
+    resampleMethod = 'bicubic',
+    toaOrSR = 'TOA',
+    convertToDailyMosaics = False,
+    applyCloudProbability = True,
+    preComputedCloudScoreOffset = preComputedSentinel2CloudScoreOffset,
+    preComputedTDOMIRMean = preComputedSentinel2TDOMIRMean,
+    preComputedTDOMIRStdDev = preComputedSentinel2TDOMIRStdDev,
+    cloudProbThresh = 40)
+
   dirty_imgs = dirty_imgs.map(getImagesLib.HoCalcAlgorithm2)
 
   #Specify which tasks for tracking
@@ -233,6 +303,7 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
   
  
       Map.addLayer(dirty_imgsT.median(),getImagesLib.vizParamsFalse,'Composite yr{} m{}'.format(analysisYear,month),False)
+      Map.addLayer(dirty_imgsT.median().select(bands).updateMask(gtacWaterMask),{'min':-0.2,'max':0.2,'palette':'00D,DDD,0D0'},'Selected Bands yr{} m{}'.format(analysisYear,month),False)
       Map.addLayer(gtacWaterMask.selfMask(),{'min':1,'max':1,'palette':'00F','classLegendDict':{'Water':'00F'}},'GTAC Water Mask yr{} m{}'.format(analysisYear,month),False)
       # Map.addLayer(jrcWaterMask.selfMask(),{'min':1,'max':1,'palette':'00F','classLegendDict':{'Water':'00F'}},'JRC Water Mask yr{} m{}'.format(analysisYear,month),False)
       dirty_imgsT = dirty_imgsT.select(bands)
@@ -301,26 +372,26 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
                   assetId=hab_summary_table_folder + '/'+output_table_name)
         t.start()
        
-  #       #Set up the z score raster for export and export it
-  #       dirty_z_for_export = dirty_z.multiply(1000).int16().set({'system:time_start':ee.Date.fromYMD(analysisYear,month,1).millis(),
-  #                                                                 'year':analysisYear,
-  #                                                                 'month':month,
-  #                                                                 'studyAreaName':studyAreaName,
-  #                                                                 'zThresh':z_thresh})
-  #       # task_list.append(output_z_name)
-  #       t = ee.batch.Export.image.toAsset(dirty_z_for_export.clip(saBounds), 
-  #                     description = output_z_name, 
-  #                     assetId = hab_z_imageCollection + '/'+ output_z_name, 
-  #                     pyramidingPolicy = {'.default':'mean'}, 
-  #                     dimensions = None, 
-  #                     region = None, 
-  #                     scale = None, 
-  #                     crs = crs, 
-  #                     crsTransform = transform, 
-  #                     maxPixels = 1e13)
-  #       print('Exporting:',output_z_name)
-  #       print(t)
-  #       t.start()
+        #Set up the z score raster for export and export it
+        dirty_z_for_export = dirty_z.multiply(1000).int16().set({'system:time_start':ee.Date.fromYMD(analysisYear,month,1).millis(),
+                                                                  'year':analysisYear,
+                                                                  'month':month,
+                                                                  'studyAreaName':studyAreaName,
+                                                                  'zThresh':z_thresh})
+        # task_list.append(output_z_name)
+        t = ee.batch.Export.image.toAsset(dirty_z_for_export.clip(saBounds), 
+                      description = output_z_name, 
+                      assetId = hab_z_imageCollection + '/'+ output_z_name, 
+                      pyramidingPolicy = {'.default':'mean'}, 
+                      dimensions = None, 
+                      region = None, 
+                      scale = None, 
+                      crs = crs, 
+                      crsTransform = transform, 
+                      maxPixels = 1e13)
+        print('Exporting:',output_z_name)
+        print(t)
+        t.start()
   return task_list
      
 ############################################################################
