@@ -25,19 +25,19 @@ cleanStartYear = 2019
 cleanEndYear = 2020
 
 #Specify years to map HABs
-analysisStartYear = 2021
-analysisEndYear = 2021
+analysisStartYear = 2022
+analysisEndYear = 2022
 
 #Specify which months to map HABs for
-startMonth = 7
-endMonth = 7
+startMonth = 9
+endMonth = 9
 
 #Location of clean lakes statistics - local path
 stats_json = r'Q:\Algal_detection_GEE_work\HAB_Mapper_5k_Outputs\clean_stats.json'
 
 
 #Export Params
-exportZAndTables = False
+exportZAndTables = True
 
 #GEE Asset folder location for HAB percent summary tables
 hab_summary_table_folder = 'projects/gtac-algal-blooms/assets/outputs/HAB-Summary-Tables'
@@ -47,7 +47,7 @@ hab_z_imageCollection = 'projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images'
 
 #Export and summary projection info
 crs = 'EPSG:5070'
-transform = [100,0,-2361915.0,0,-100,3177735.0]
+transform = [30,0,-2361915.0,0,-30,3177735.0]
 
 #Z score reducer - how to summarize the multiple z scores for a given month
 #If a more conservative depiction of algal blooms is needed, put a lower percentile and visa versa
@@ -56,7 +56,7 @@ reducer = ee.Reducer.percentile([50])
 #Z score thresholds for identifying HABs (generally 1-3 or so works well) - anything above this z-score is mapped as HAB
 #This must be a list. It is intended to handle multiple thresholds to produce multiple fields in the summary tables
 #E.g. If you'd like to threshold at 0.5 and 1 standard deviation, specify [0.5,1]
-z_threshs = [0.75]#[0.3,0.5,0.75,1,1.5,2]
+z_threshs = [0.75,1,1.5,2]#[0.3,0.5,0.75,1,1.5,2]
 
 #Indices to use 
 #Good choices are NDGI or bloom2
@@ -64,38 +64,38 @@ hab_indices = ['NDGI']
 
 #Specify study areas to map
 #Current choices are 'OR','WA',or 'WY'
-run_study_area_keys = ['OR']
+run_study_area_keys = ['WY']
 
 #Define clean control stats
 clean_lakes = {}
 
-clean_lakes['OR'] = ee.Geometry.MultiPolygon(\
-        [[[[-122.16247277538403, 42.98060571118538],\
-           [-122.16247277538403, 42.9016878744337],\
-           [-122.0512362031184, 42.9016878744337],\
-           [-122.0512362031184, 42.98060571118538]]],\
-         [[[-122.03353176573546, 43.50210081409495],\
-           [-122.03353176573546, 43.45925265588565],\
-           [-121.95216427305968, 43.45925265588565],\
-           [-121.95216427305968, 43.50210081409495]]],\
-         [[[-122.06863020193826, 43.76538659547769],\
-           [-122.06863020193826, 43.6812758137654],\
-           [-122.00648878348123, 43.6812758137654],\
-           [-122.00648878348123, 43.76538659547769]]]], None, False) 
+# clean_lakes['OR'] = ee.Geometry.MultiPolygon(\
+#         [[[[-122.16247277538403, 42.98060571118538],\
+#            [-122.16247277538403, 42.9016878744337],\
+#            [-122.0512362031184, 42.9016878744337],\
+#            [-122.0512362031184, 42.98060571118538]]],\
+#          [[[-122.03353176573546, 43.50210081409495],\
+#            [-122.03353176573546, 43.45925265588565],\
+#            [-121.95216427305968, 43.45925265588565],\
+#            [-121.95216427305968, 43.50210081409495]]],\
+#          [[[-122.06863020193826, 43.76538659547769],\
+#            [-122.06863020193826, 43.6812758137654],\
+#            [-122.00648878348123, 43.6812758137654],\
+#            [-122.00648878348123, 43.76538659547769]]]], None, False) 
 
-# clean_lakes['WY'] = ee.Geometry.MultiPolygon(\
-#         [[[[-109.56790010304167, 42.96292917782831],\
-#            [-109.56790010304167, 42.953161377243354],\
-#            [-109.55584089131071, 42.953161377243354],\
-#            [-109.55584089131071, 42.96292917782831]]],\
-#          [[[-109.70411340565397, 42.94700466781123],\
-#            [-109.70411340565397, 42.92224596795357],\
-#            [-109.66875116200163, 42.92224596795357],\
-#            [-109.66875116200163, 42.94700466781123]]],\
-#          [[[-109.90752207668908, 43.02675227419442],\
-#            [-109.90752207668908, 42.98683332211115],\
-#            [-109.82924448879845, 42.98683332211115],\
-#            [-109.82924448879845, 43.02675227419442]]]], None, False)
+clean_lakes['WY'] = ee.Geometry.MultiPolygon(\
+        [[[[-109.56790010304167, 42.96292917782831],\
+           [-109.56790010304167, 42.953161377243354],\
+           [-109.55584089131071, 42.953161377243354],\
+           [-109.55584089131071, 42.96292917782831]]],\
+         [[[-109.70411340565397, 42.94700466781123],\
+           [-109.70411340565397, 42.92224596795357],\
+           [-109.66875116200163, 42.92224596795357],\
+           [-109.66875116200163, 42.94700466781123]]],\
+         [[[-109.90752207668908, 43.02675227419442],\
+           [-109.90752207668908, 42.98683332211115],\
+           [-109.82924448879845, 42.98683332211115],\
+           [-109.82924448879845, 43.02675227419442]]]], None, False)
 
 # clean_lakes['WA'] = ee.Geometry.MultiPolygon(\
 #         [[[[-121.32593536613808, 47.586467669618045],\
@@ -133,10 +133,10 @@ summary_areas_dict['WY'] = ee.FeatureCollection('projects/gtac-algal-blooms/asse
 clean_stats = getStats(clean_lakes,cleanStartYear,cleanEndYear,startMonth,endMonth,stats_json,hab_indices,maxTries = 20,crs =crs,transform =transform)
 
 #Map habs
-# tasks = batchMapHABs(summary_areas_dict,run_study_area_keys,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,reducer,hab_indices,z_threshs,exportZAndTables,hab_summary_table_folder,hab_z_imageCollection,crs,transform)
+tasks = batchMapHABs(summary_areas_dict,run_study_area_keys,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,reducer,hab_indices,z_threshs,exportZAndTables,hab_summary_table_folder,hab_z_imageCollection,crs,transform)
 
 #Wait until tasks are finished
-# tml.trackTasks2(id_list = tasks)
+tml.trackTasks2(id_list = tasks)
 
 #####################################################
 #Summarize tables to produce deliverables
@@ -145,7 +145,7 @@ clean_stats = getStats(clean_lakes,cleanStartYear,cleanEndYear,startMonth,endMon
 
 # #Use this to summarize all specified states at once
 # for z_thresh in z_threshs:
-#   summarizeTables(hab_summary_table_folder,local_hab_summary_table_folder,analysisStartYear,analysisEndYear,startMonth,endMonth,summary_areas_dict,run_study_area_keys,z_thresh)
+  # summarizeTables(hab_summary_table_folder,local_hab_summary_table_folder,analysisStartYear,analysisEndYear,startMonth,endMonth,summary_areas_dict,run_study_area_keys,z_thresh)
 
 #####################################################
 if  not exportZAndTables:

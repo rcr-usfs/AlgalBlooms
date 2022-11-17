@@ -108,50 +108,50 @@ def getStats(studyAreas,startYear,endYear,startMonth,endMonth,stats_json,bands =
         endJulian = int(ee.Date.fromYMD(2003,month,1).advance(1,'month').advance(-1,'day').format('DD').getInfo())
         
         #Get Landsat and Sentinel 2 images
-        # clean_imgs = getImagesLib.getProcessedLandsatAndSentinel2Scenes(
-        # 	saBounds,
-        # 	startYear,
-        # 	endYear,
-        # 	startJulian,
-        # 	endJulian,
-        #   includeSLCOffL7 = True,
-        #   convertToDailyMosaics = True,
-        #   landsatResampleMethod = 'bicubic',
-        #   sentinel2ResampleMethod = 'bicubic',
-        # 	preComputedLandsatCloudScoreOffset = preComputedLandsatCloudScoreOffset,
-        # 	preComputedSentinel2CloudScoreOffset=preComputedSentinel2CloudScoreOffset,
-        # 	preComputedLandsatTDOMIRMean = preComputedLandsatTDOMIRMean,
-        # 	preComputedLandsatTDOMIRStdDev=preComputedLandsatTDOMIRStdDev,
-        # 	preComputedSentinel2TDOMIRMean=preComputedSentinel2TDOMIRMean,
-        # 	preComputedSentinel2TDOMIRStdDev=preComputedSentinel2TDOMIRStdDev)
+        clean_imgs = getImagesLib.getProcessedLandsatAndSentinel2Scenes(
+        	saBounds,
+        	startYear,
+        	endYear,
+        	startJulian,
+        	endJulian,
+          includeSLCOffL7 = True,
+          convertToDailyMosaics = True,
+          landsatResampleMethod = 'bicubic',
+          sentinel2ResampleMethod = 'bicubic',
+        	preComputedLandsatCloudScoreOffset = preComputedLandsatCloudScoreOffset,
+        	preComputedSentinel2CloudScoreOffset=preComputedSentinel2CloudScoreOffset,
+        	preComputedLandsatTDOMIRMean = preComputedLandsatTDOMIRMean,
+        	preComputedLandsatTDOMIRStdDev=preComputedLandsatTDOMIRStdDev,
+        	preComputedSentinel2TDOMIRMean=preComputedSentinel2TDOMIRMean,
+        	preComputedSentinel2TDOMIRStdDev=preComputedSentinel2TDOMIRStdDev)
         
-        clean_imgs = getImagesLib.getProcessedSentinel2Scenes(\
-            saBounds,
-            startYear,
-            endYear,
-            startJulian,
-            endJulian,
-            applyQABand = False,
-            applyCloudScore = False,
-            applyShadowShift = False,
-            applyTDOM = True,
-            cloudScoreThresh = 20,
-            performCloudScoreOffset = True,
-            cloudScorePctl = 10,
-            cloudHeights = ee.List.sequence(500,10000,500),
-            zScoreThresh = -1,
-            shadowSumThresh = 0.35,
-            contractPixels = 1.5,
-            dilatePixels = 3.5,
-            shadowSumBands = ['nir','swir1'],
-            resampleMethod = 'aggregate',
-            toaOrSR = 'TOA',
-            convertToDailyMosaics = False,
-            applyCloudProbability = True,
-            preComputedCloudScoreOffset = preComputedSentinel2CloudScoreOffset,
-            preComputedTDOMIRMean = preComputedSentinel2TDOMIRMean,
-            preComputedTDOMIRStdDev = preComputedSentinel2TDOMIRStdDev,
-            cloudProbThresh = 40)
+        # clean_imgs = getImagesLib.getProcessedSentinel2Scenes(\
+        #     saBounds,
+        #     startYear,
+        #     endYear,
+        #     startJulian,
+        #     endJulian,
+        #     applyQABand = False,
+        #     applyCloudScore = False,
+        #     applyShadowShift = False,
+        #     applyTDOM = True,
+        #     cloudScoreThresh = 20,
+        #     performCloudScoreOffset = True,
+        #     cloudScorePctl = 10,
+        #     cloudHeights = ee.List.sequence(500,10000,500),
+        #     zScoreThresh = -1,
+        #     shadowSumThresh = 0.35,
+        #     contractPixels = 1.5,
+        #     dilatePixels = 3.5,
+        #     shadowSumBands = ['nir','swir1'],
+        #     resampleMethod = 'aggregate',
+        #     toaOrSR = 'TOA',
+        #     convertToDailyMosaics = False,
+        #     applyCloudProbability = True,
+        #     preComputedCloudScoreOffset = preComputedSentinel2CloudScoreOffset,
+        #     preComputedTDOMIRMean = preComputedSentinel2TDOMIRMean,
+        #     preComputedTDOMIRStdDev = preComputedSentinel2TDOMIRStdDev,
+        #     cloudProbThresh = 40)
 
         #Reduce to a median composite
         clean_imgs = clean_imgs.map(getImagesLib.HoCalcAlgorithm2)
@@ -225,52 +225,52 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
   print(analysisStartYear,analysisEndYear,startMonth,endMonth, startJulian,endJulian)
   
   #Get Landsat and Sentinel 2 images
-  # dirty_imgs = getImagesLib.getProcessedLandsatAndSentinel2Scenes(
-  #   saBounds,
-  #   analysisStartYear,
-  #   analysisEndYear,
-  #   startJulian,
-  #   endJulian,
-  #   includeSLCOffL7 = True,
-  #   convertToDailyMosaics = True,
-  #   landsatResampleMethod = 'bicubic',
-  #   sentinel2ResampleMethod = 'bicubic',
-  #   applyTDOMLandsat = True,
-  #   applyTDOMSentinel2 = True,
-  #   preComputedLandsatCloudScoreOffset = preComputedLandsatCloudScoreOffset,
-  #   preComputedSentinel2CloudScoreOffset=preComputedSentinel2CloudScoreOffset,
-  #   preComputedLandsatTDOMIRMean = preComputedSentinel2TDOMIRMean,
-  #   preComputedLandsatTDOMIRStdDev=preComputedSentinel2TDOMIRStdDev,
-  #   preComputedSentinel2TDOMIRMean=preComputedSentinel2TDOMIRMean,
-  #   preComputedSentinel2TDOMIRStdDev=preComputedSentinel2TDOMIRStdDev)
-
-  dirty_imgs = getImagesLib.getProcessedSentinel2Scenes(\
+  dirty_imgs = getImagesLib.getProcessedLandsatAndSentinel2Scenes(
     saBounds,
     analysisStartYear,
     analysisEndYear,
     startJulian,
     endJulian,
-    applyQABand = False,
-    applyCloudScore = False,
-    applyShadowShift = False,
-    applyTDOM = True,
-    cloudScoreThresh = 20,
-    performCloudScoreOffset = True,
-    cloudScorePctl = 10,
-    cloudHeights = ee.List.sequence(500,10000,500),
-    zScoreThresh = -1,
-    shadowSumThresh = 0.35,
-    contractPixels = 1.5,
-    dilatePixels = 3.5,
-    shadowSumBands = ['nir','swir1'],
-    resampleMethod = 'bicubic',
-    toaOrSR = 'TOA',
-    convertToDailyMosaics = False,
-    applyCloudProbability = True,
-    preComputedCloudScoreOffset = preComputedSentinel2CloudScoreOffset,
-    preComputedTDOMIRMean = preComputedSentinel2TDOMIRMean,
-    preComputedTDOMIRStdDev = preComputedSentinel2TDOMIRStdDev,
-    cloudProbThresh = 40)
+    includeSLCOffL7 = True,
+    convertToDailyMosaics = True,
+    landsatResampleMethod = 'bicubic',
+    sentinel2ResampleMethod = 'bicubic',
+    applyTDOMLandsat = True,
+    applyTDOMSentinel2 = True,
+    preComputedLandsatCloudScoreOffset = preComputedLandsatCloudScoreOffset,
+    preComputedSentinel2CloudScoreOffset=preComputedSentinel2CloudScoreOffset,
+    preComputedLandsatTDOMIRMean = preComputedSentinel2TDOMIRMean,
+    preComputedLandsatTDOMIRStdDev=preComputedSentinel2TDOMIRStdDev,
+    preComputedSentinel2TDOMIRMean=preComputedSentinel2TDOMIRMean,
+    preComputedSentinel2TDOMIRStdDev=preComputedSentinel2TDOMIRStdDev)
+
+  # dirty_imgs = getImagesLib.getProcessedSentinel2Scenes(\
+  #   saBounds,
+  #   analysisStartYear,
+  #   analysisEndYear,
+  #   startJulian,
+  #   endJulian,
+  #   applyQABand = False,
+  #   applyCloudScore = False,
+  #   applyShadowShift = False,
+  #   applyTDOM = True,
+  #   cloudScoreThresh = 20,
+  #   performCloudScoreOffset = True,
+  #   cloudScorePctl = 10,
+  #   cloudHeights = ee.List.sequence(500,10000,500),
+  #   zScoreThresh = -1,
+  #   shadowSumThresh = 0.35,
+  #   contractPixels = 1.5,
+  #   dilatePixels = 3.5,
+  #   shadowSumBands = ['nir','swir1'],
+  #   resampleMethod = 'bicubic',
+  #   toaOrSR = 'TOA',
+  #   convertToDailyMosaics = False,
+  #   applyCloudProbability = True,
+  #   preComputedCloudScoreOffset = preComputedSentinel2CloudScoreOffset,
+  #   preComputedTDOMIRMean = preComputedSentinel2TDOMIRMean,
+  #   preComputedTDOMIRStdDev = preComputedSentinel2TDOMIRStdDev,
+  #   cloudProbThresh = 40)
 
   dirty_imgs = dirty_imgs.map(getImagesLib.HoCalcAlgorithm2)
 
@@ -326,7 +326,7 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
       bns = hab.bandNames()
       # print('here')
       bns = list(map(lambda z:'AB_Pct_Z_' + f'{int(z*100):03}' ,z_threshs))
-      # print('bns:',bns)
+      print('bns:',bns)
       hab = hab.rename(bns)
       # print(hab.bandNames().getInfo())
 
@@ -377,8 +377,8 @@ def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMo
                                                                   'year':analysisYear,
                                                                   'month':month,
                                                                   'studyAreaName':studyAreaName,
-                                                                  'zThresh':z_thresh})
-        # task_list.append(output_z_name)
+                                                                  'zThreshs':','.join([str(z) for z in z_threshs])})
+        task_list.append(output_z_name)
         t = ee.batch.Export.image.toAsset(dirty_z_for_export.clip(saBounds), 
                       description = output_z_name, 
                       assetId = hab_z_imageCollection + '/'+ output_z_name, 
