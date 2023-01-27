@@ -1,5 +1,5 @@
 """
-   Copyright 2022 Ian Housman, RedCastle Resources Inc.
+   Copyright 2023 Ian Housman, RedCastle Resources Inc.
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -13,661 +13,665 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 """
-#Script to map algal blooms in Google Earth Engine and then summarize outputs and provide
-#final deliverables for local viewing
-#Intended to work within the geeViz package
+# Template script to map algal blooms in Google Earth Engine using field observations for training 
+# Intended to work within the geeViz package
 # python -m pip install geeViz
-#Also requires gdal
+# Also requires numpy, and pandas
 ####################################################################################################
+import os,sys,threading,json,pandas,time,glob
 import geeViz.getImagesLib as getImagesLib
+import geeViz.assetManagerLib as aml
 import geeViz.taskManagerLib as tml
+import numpy as np
 ee = getImagesLib.ee
 Map = getImagesLib.Map
+####################################################################################################
+# Function to convert a Pandas dataframe to geojson
+# Function taken from: https://notebook.community/captainsafia/nteract/applications/desktop/example-notebooks/pandas-to-geojson
+def df_to_geojson(df, properties, lat='latitude', lon='longitude'):
+    # create a new python dict to contain our geojson data, using geojson format
+    geojson = {'type':'FeatureCollection', 'features':[]}
 
-import make_esri_viewer as mew
-import json,os,threading,time,glob
-from osgeo import gdal
-##################################################
-#Bring in some existing assets to use for cloud masking
-preComputedCloudScoreOffset = getImagesLib.getPrecomputedCloudScoreOffsets(10)
-preComputedLandsatCloudScoreOffset = preComputedCloudScoreOffset['landsat']
-preComputedSentinel2CloudScoreOffset = preComputedCloudScoreOffset['sentinel2']
+    # loop through each row in the dataframe and convert each row to geojson format
+    for _, row in df.iterrows():
+      if not pandas.isnull(row[lon]) and not pandas.isnull(row[lat]):
+        # create a feature template to fill in
+        feature = {'type':'Feature',
+                    'properties':{},
+                    'geometry':{'type':'Point',
+                                'coordinates':[]}}
 
-#The TDOM stats are the mean and standard deviations of the two bands used in TDOM
-#By default, TDOM uses the nir and swir1 bands
-preComputedTDOMStats = getImagesLib.getPrecomputedTDOMStats()
-preComputedLandsatTDOMIRMean = preComputedTDOMStats['landsat']['mean']
-preComputedLandsatTDOMIRStdDev = preComputedTDOMStats['landsat']['stdDev']
+        # fill in the coordinates
+        feature['geometry']['coordinates'] = [row[lon],row[lat]]
 
-preComputedSentinel2TDOMIRMean = preComputedTDOMStats['sentinel2']['mean']
-preComputedSentinel2TDOMIRStdDev = preComputedTDOMStats['sentinel2']['stdDev']
-############################################################################
-############################################################################
-#On-the-fly basic water masking method
-#This method is used to provide a time-sensitive water mask
-#This method tends to work well if there is no wet snow present
-#Wet snow over flat areas can result in false positives
-def simpleWaterMask(img,contractPixels = 1.5):
-  img = getImagesLib.addTCAngles(img);
-  ned = ee.Image("USGS/NED").resample('bicubic')
-  slope = ee.Terrain.slope(ned.focal_mean(5.5))
-  flat = slope.lte(10)
-  
-  waterMask = img.select(['tcAngleBW']).gte(-0.05)\
-    .And(img.select(['tcAngleBG']).lte(0.05))\
-    .And(img.select(['brightness']).lt(0.3))\
-    .And(flat).focal_min(contractPixels)
-  
-  return waterMask
-
-#Function to get water mask from JRC water data
-#As of August 2021, these data stop in 2018, so they cannot represent dates after
-#It can be challenging to get a timely water mask with this method 
-def getWaterMask(startYear,endYear,startMonth,endMonth,contractPixels = 2.5):
-  startWaterYear = startYear
-  endWaterYear = endYear
-  if startYear > 2018: startWaterYear = 2018
-  if endYear > 2018: endWaterYear = 2018
-  permWater = ee.Image("JRC/GSW1_1/GlobalSurfaceWater").select([0]).gte(90).unmask(0)
-  tempWater =ee.ImageCollection("JRC/GSW1_1/MonthlyHistory")\
-                .filter(ee.Filter.calendarRange(startWaterYear,endWaterYear,'year'))\
-                .filter(ee.Filter.calendarRange(startMonth,endMonth,'month')).mode().eq(2).unmask(0).focal_min(contractPixels)
-
-  water_mask = permWater.Or(tempWater)
-  return water_mask
-############################################################################
-#Function to get stats for clean water bodies
-#This serves as the control population to compare water bodies against
-#Stats are computed for each study area for each month
-def getStats(studyAreas,startYear,endYear,startMonth,endMonth,stats_json,bands = ['bloom2','NDGI'],maxTries = 20,crs = 'EPSG:5070',transform = [30,0,-2361915.0,0,-30,3177735.0]):
-
-  #Set up stats outputs
-  out_stats = {}
-  if os.path.exists(stats_json):
-    o = open(stats_json,'r')
-    out_stats = json.loads(o.read())
-  
-  #Iterate across each study area and compute stats for each month
-  for studyArea in list(studyAreas.keys()):
+        # for each column, get the value and add it as a new feature property
+        for prop in properties:
+          p = row[prop]
+          if pandas.isnull(p):p= 'NA'
+          feature['properties'][prop] = p
+        
+        # add this feature (aka, converted dataframe row) to the list of features inside our dict
+        
+        geojson['features'].append(feature)
     
-    sa = studyAreas[studyArea]
-    try:
-      saBounds = sa.geometry().bounds()
-    except:
-      saBounds = sa.bounds()
-    Map.addLayer(sa,{},studyArea + ' outline',False)
-    Map.addLayer(saBounds,{},studyArea + ' bounds',False)
-    for month in range(startMonth,endMonth+1):
+    return geojson
+####################################################################################################
+# Function to take the Excel HCB spreadsheet and convert it to a GEE featureCollection
+def prepareTrainingData(hcb_data,lat='Sampling Latitude', lon='Sampling Longitude',properties=[]):
+    # Read in the Excel table as a Pandas dataframe
+    hcb_df = pandas.read_excel(hcb_data)
 
-      sa_month_key = '{}_{}'.format(studyArea,month)
-      if sa_month_key not in out_stats.keys():
-        print(studyArea,month)
-     
+    # Convert the time to a user-friendly format of yyyy-mm-DD
+    for c in hcb_df.columns[hcb_df.dtypes=='datetime64[ns]']:
+        hcb_df[c]= hcb_df[c].dt.strftime('%Y-%m-%d')
 
-        startJulian = int(ee.Date.fromYMD(2003,month,1).format('DD').getInfo())
-        endJulian = int(ee.Date.fromYMD(2003,month,1).advance(1,'month').advance(-1,'day').format('DD').getInfo())
-        
-        #Get Landsat and Sentinel 2 images
-        clean_imgs = getImagesLib.getProcessedLandsatAndSentinel2Scenes(
-        	saBounds,
-        	startYear,
-        	endYear,
-        	startJulian,
-        	endJulian,
-          includeSLCOffL7 = True,
-          convertToDailyMosaics = True,
-          landsatResampleMethod = 'bicubic',
-          sentinel2ResampleMethod = 'bicubic',
-        	preComputedLandsatCloudScoreOffset = preComputedLandsatCloudScoreOffset,
-        	preComputedSentinel2CloudScoreOffset=preComputedSentinel2CloudScoreOffset,
-        	preComputedLandsatTDOMIRMean = preComputedLandsatTDOMIRMean,
-        	preComputedLandsatTDOMIRStdDev=preComputedLandsatTDOMIRStdDev,
-        	preComputedSentinel2TDOMIRMean=preComputedSentinel2TDOMIRMean,
-        	preComputedSentinel2TDOMIRStdDev=preComputedSentinel2TDOMIRStdDev)
-        
-        # clean_imgs = getImagesLib.getProcessedSentinel2Scenes(\
-        #     saBounds,
-        #     startYear,
-        #     endYear,
-        #     startJulian,
-        #     endJulian,
-        #     applyQABand = False,
-        #     applyCloudScore = False,
-        #     applyShadowShift = False,
-        #     applyTDOM = True,
-        #     cloudScoreThresh = 20,
-        #     performCloudScoreOffset = True,
-        #     cloudScorePctl = 10,
-        #     cloudHeights = ee.List.sequence(500,10000,500),
-        #     zScoreThresh = -1,
-        #     shadowSumThresh = 0.35,
-        #     contractPixels = 1.5,
-        #     dilatePixels = 3.5,
-        #     shadowSumBands = ['nir','swir1'],
-        #     resampleMethod = 'aggregate',
-        #     toaOrSR = 'TOA',
-        #     convertToDailyMosaics = False,
-        #     applyCloudProbability = True,
-        #     preComputedCloudScoreOffset = preComputedSentinel2CloudScoreOffset,
-        #     preComputedTDOMIRMean = preComputedSentinel2TDOMIRMean,
-        #     preComputedTDOMIRStdDev = preComputedSentinel2TDOMIRStdDev,
-        #     cloudProbThresh = 40)
+    # Convert the dataframe to geojson
+    hfb_json = df_to_geojson(hcb_df, properties, lat, lon)
 
-        #Reduce to a median composite
-        clean_imgs = clean_imgs.map(getImagesLib.HoCalcAlgorithm2)
-        clean_composite = clean_imgs.median()
+    # Read in the geojson as a GEE featureCollection
+    hfb_json = ee.FeatureCollection(hfb_json)
+    return hfb_json
+####################################################################################################
+# Function to save a Random Forest model from GEE
+def saveModel(rfModel,filename,delimiter='split_trees_here'):
+    trees = rfModel.explain().getInfo()
+    # print('Tree keys:',trees.keys())
+    # print(rfModel.getInfo())
+    trees=trees['trees']
+    o = open(filename,'w')
+    o.write(delimiter.join(trees))
+    o.close()
+# Function to read in saved Random Forest model from GEE
+def openModel(filename,delimiter='split_trees_here'):
+    o = open(filename,'r')
+    trees = o.read().split(delimiter)
+    o.close()
+    return ee.Classifier.decisionTreeEnsemble(trees)
+####################################################################################################    
+# Function to get a predictor stack for a supervised classification of water
+def getWaterPredictors(studyArea,water_startYear=2018,water_endYear=2022,water_startJulian=213,water_endJulian=229,pred_bands=['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI', 'elevation','slope', 'aspect',  'hillshade', 'tpi_29', 'tpi_59'],addToMap=False):
 
+    # Set up a standard name ending based on the date params
+    nameEnd = 'yr{}-{} jd{}-{}'.format(water_startYear,water_endYear,water_startJulian,water_endJulian)
 
+    # Get the elevation data
+    ned = ee.Image("USGS/3DEP/10m").resample('bicubic').rename(['elevation'])
+    # ned = ee.Image("USGS/NED").resample('bicubic')
+    slope = ee.Terrain.slope(ned).rename(['slope'])
+    aspect = ee.Terrain.aspect(ned).rename(['aspect'])
 
-           #Get water bodies and convert them to a vector to compute stats within
-        water_mask = getWaterMask(startYear,endYear,startMonth,endMonth).selfMask()
-        # water_mask = simpleWaterMask(clean_composite).selfMask()
-        Map.addLayer(clean_composite,getImagesLib.vizParamsFalse,'Clean Composite {} {}'.format(studyArea,month),False)
-        
-        clean_composite = clean_composite.updateMask(water_mask).select(bands)
+    # Compute some topographic position indices at different scales
+    tpi_29 = ned.subtract(ned.focal_mean(14.5)).rename(['tpi_29'])
+    tpi_59 = ned.subtract(ned.focal_mean(29.5)).rename(['tpi_59'])
 
-        Map.addLayer(clean_composite,{'min':-0.2,'max':0.2,'palette':'00D,DDD,0D0'},'Selected Bands {} {}'.format(studyArea,month),False)
-        # clean_lakes = gtacWaterMask.clip(sa).reduceToVectors(scale = 30)
-        Map.addLayer(water_mask.clip(sa),{'palette':'00D'},'Clean Lakes {} {}'.format(studyArea,month))
-        
-        #Compute zonal stats (mean and stdDev) within water areas
-        clean_stats = clean_composite.clip(sa).reduceRegion(ee.Reducer.mean().combine(ee.Reducer.stdDev(),'',True),saBounds,None,crs,transform,True,1e13)
-  
-        #Convert to local json
-        stats = None
-        tryCount = 1
-        def getStatsTryer():return clean_stats.getInfo()
-        while stats == None and tryCount < maxTries:
-          try:
-            print('Computing stats. Try number: ',tryCount)
-            stats = getStatsTryer()
-            print(stats)
-            out_stats[sa_month_key] = stats
-            print(out_stats)
-          except Exception as e:
-            print(e)
-        
-          tryCount+=1
-      else:
-        print('Already computed stats for:',studyArea,month)
-      o = open(stats_json,'w')
-      o.write(json.dumps(out_stats))
-      o.close()
-  return out_stats
-
-	
-############################################################################
-def batchMapHABs(summary_areas_dict,study_area_stats_keys,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,reducer = ee.Reducer.percentile([50]),bands = ['bloom2','NDGI'],z_threshs = [1],exportZAndTables = False,hab_summary_table_folder = 'projects/gtac-algal-blooms/assets/outputs/HAB-Summary-Tables',hab_z_imageCollection = 'projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images',crs = 'EPSG:5070',transform = [30,0,-2361915.0,0,-30,3177735.0]):
-  task_list = []
-  for study_area_stats_key in study_area_stats_keys:
-    summary_areas = summary_areas_dict[study_area_stats_key]
-    tasks = mapHABs(summary_areas,study_area_stats_key,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,study_area_stats_key,reducer,bands,z_threshs,exportZAndTables,hab_summary_table_folder,hab_z_imageCollection,crs,transform)
-    task_list.extend(tasks)
-  return task_list
-############################################################################
-#Function to map algal blooms
-#These aren't always harmful
-#This function produces a raster z score of algal bloom and a summary table
-def mapHABs(summaryAreas,studyAreaName,analysisStartYear,analysisEndYear,startMonth,endMonth,clean_stats,stats_sa,reducer = ee.Reducer.percentile([50]),bands = ['bloom2','NDGI'],z_threshs = [1],exportZAndTables = False,hab_summary_table_folder = 'projects/gtac-algal-blooms/assets/outputs/HAB-Summary-Tables',hab_z_imageCollection = 'projects/gtac-algal-blooms/assets/outputs/HAB-Z-Images',crs = 'EPSG:5070',transform = [30,0,-2361915.0,0,-30,3177735.0]):
-
-  #Set up output areas and dates
-  try:
-    saBounds = summaryAreas.geometry().bounds()
-  except:
-    saBounds = summaryAreas.bounds()
-
-  Map.addLayer(summaryAreas,{},'Study Area',False)
-  Map.addLayer(saBounds,{},'Clip Area',False)
-
-
-  startJulian = int(ee.Date.fromYMD(analysisStartYear,startMonth,1).format('DD').getInfo())
-  endJulian = int(ee.Date.fromYMD(analysisEndYear,endMonth,1).advance(1,'month').advance(-1,'day').format('DD').getInfo())
-  print(analysisStartYear,analysisEndYear,startMonth,endMonth, startJulian,endJulian)
-  
-  #Get Landsat and Sentinel 2 images
-  dirty_imgs = getImagesLib.getProcessedLandsatAndSentinel2Scenes(
-    saBounds,
-    analysisStartYear,
-    analysisEndYear,
-    startJulian,
-    endJulian,
-    includeSLCOffL7 = True,
-    convertToDailyMosaics = True,
-    landsatResampleMethod = 'bicubic',
-    sentinel2ResampleMethod = 'bicubic',
-    applyTDOMLandsat = True,
-    applyTDOMSentinel2 = True,
-    preComputedLandsatCloudScoreOffset = preComputedLandsatCloudScoreOffset,
-    preComputedSentinel2CloudScoreOffset=preComputedSentinel2CloudScoreOffset,
-    preComputedLandsatTDOMIRMean = preComputedSentinel2TDOMIRMean,
-    preComputedLandsatTDOMIRStdDev=preComputedSentinel2TDOMIRStdDev,
-    preComputedSentinel2TDOMIRMean=preComputedSentinel2TDOMIRMean,
-    preComputedSentinel2TDOMIRStdDev=preComputedSentinel2TDOMIRStdDev)
-
-  # dirty_imgs = getImagesLib.getProcessedSentinel2Scenes(\
-  #   saBounds,
-  #   analysisStartYear,
-  #   analysisEndYear,
-  #   startJulian,
-  #   endJulian,
-  #   applyQABand = False,
-  #   applyCloudScore = False,
-  #   applyShadowShift = False,
-  #   applyTDOM = True,
-  #   cloudScoreThresh = 20,
-  #   performCloudScoreOffset = True,
-  #   cloudScorePctl = 10,
-  #   cloudHeights = ee.List.sequence(500,10000,500),
-  #   zScoreThresh = -1,
-  #   shadowSumThresh = 0.35,
-  #   contractPixels = 1.5,
-  #   dilatePixels = 3.5,
-  #   shadowSumBands = ['nir','swir1'],
-  #   resampleMethod = 'bicubic',
-  #   toaOrSR = 'TOA',
-  #   convertToDailyMosaics = False,
-  #   applyCloudProbability = True,
-  #   preComputedCloudScoreOffset = preComputedSentinel2CloudScoreOffset,
-  #   preComputedTDOMIRMean = preComputedSentinel2TDOMIRMean,
-  #   preComputedTDOMIRStdDev = preComputedSentinel2TDOMIRStdDev,
-  #   cloudProbThresh = 40)
-
-  dirty_imgs = dirty_imgs.map(getImagesLib.HoCalcAlgorithm2)
-
-  #Specify which tasks for tracking
-  task_list = []
-  #Iterate across each year and month
-  for analysisYear in range(analysisStartYear,analysisEndYear+1):
-    for month in range(startMonth,endMonth+1):
-
-      #Filter out images for the year-month
-      startJulianT = int(ee.Date.fromYMD(analysisYear,month,1).format('DD').getInfo())
-      endJulianT = int(ee.Date.fromYMD(analysisYear,month,1).advance(1,'month').advance(-1,'day').format('DD').getInfo())
-      dirty_imgsT = dirty_imgs.filter(ee.Filter.calendarRange(analysisYear,analysisYear,'year'))\
-                              .filter(ee.Filter.calendarRange(startJulianT,endJulianT))
-
-      #Water mask can be computed as the mode of the water mask for each image
-      # gtacWaterMask = dirty_imgsT.map(simpleWaterMask).mode()
-
-      #Or simply by computing it from the median of the images
-      gtacWaterMask = simpleWaterMask(dirty_imgsT.median())
-
-      #JRC water mask isn't currently used since it commits large areas at edges of water bodies as water which
-      #results in false positives
-      # jrcWaterMask = getWaterMask(analysisYear,analysisYear,month,month)
-      # print(dirty_imgsT.size().getInfo(),analysisYear,month,startJulianT,endJulianT)
-  
-  
-  # # Map.addLayer(waterMask,{'min':1,'max':1,'palette':'00F'},'Water Mask')
-
-  
- 
-      Map.addLayer(dirty_imgsT.median(),getImagesLib.vizParamsFalse,'Composite yr{} m{}'.format(analysisYear,month),False)
-      Map.addLayer(dirty_imgsT.median().select(bands).updateMask(gtacWaterMask),{'min':-0.2,'max':0.2,'palette':'00D,DDD,0D0'},'Selected Bands yr{} m{}'.format(analysisYear,month),False)
-      Map.addLayer(gtacWaterMask.selfMask(),{'min':1,'max':1,'palette':'00F','classLegendDict':{'Water':'00F'}},'GTAC Water Mask yr{} m{}'.format(analysisYear,month),False)
-      # Map.addLayer(jrcWaterMask.selfMask(),{'min':1,'max':1,'palette':'00F','classLegendDict':{'Water':'00F'}},'JRC Water Mask yr{} m{}'.format(analysisYear,month),False)
-      dirty_imgsT = dirty_imgsT.select(bands)
-
-      #Specify which water mask to use
-      waterMask = gtacWaterMask
-
-      #Bring in the stats from the clean lakes
-      means = ee.Image([clean_stats['{}_{}'.format(stats_sa,month)][band+'_mean'] for band in bands])
-      stdDevs = ee.Image([clean_stats['{}_{}'.format(stats_sa,month)][band+'_stdDev'] for band in bands])
-
-      #Compute the z score based on the stats from the clean lakes
-      dirty_zs = dirty_imgsT.map(lambda img: img.subtract(means).divide(stdDevs).updateMask(waterMask))
-      
-      #Summarize based on the provided reducer, and then take the max of that if multiple bands were used
-      dirty_z = dirty_zs.reduce(reducer).reduce(ee.Reducer.max())
-
-      #Threshold hab/not hab
-      hab = dirty_z.gte(z_threshs)
-      bns = hab.bandNames()
-      # print('here')
-      bns = list(map(lambda z:'AB_Pct_Z_' + f'{int(z*100):03}' ,z_threshs))
-      print('bns:',bns)
-      hab = hab.rename(bns)
-      # print(hab.bandNames().getInfo())
-
-      Map.addLayer(dirty_z,{'min':0,'max':2,'palette':'00F,0F0,F00'},'Dirty Z yr{} m{}'.format(analysisYear,month),False)
-      Map.addLayer(hab,{'min':0,'max':1,'classLegendDict':{'Not HAB':'00F','HAB':'F00'}},'AB yr{} m{}'.format(analysisYear,month),False)
-      
-      #Function to convert to pct of an area as hab
-      def toPct(f,inField,outField):
-        a = f.get(inField);
-        a = ee.Array(a).slice(1,1,2).project([0])
-        sum = ee.Number(a.reduce(ee.Reducer.sum(),[0]).get([0]))
-        a = ee.Number(a.toList().get(1))
-        pct = ee.Number(a.divide(sum).multiply(100))
-        return f.set({inField:pct,outField:pct,'year':analysisYear,'month':month})
-
-      #Set up output table and raster for export
-      if exportZAndTables:
-
-        #Summarize the pct of each area mapped as algal bloom
-        summary_table = hab.reduceRegions(summaryAreas, ee.Reducer.fixedHistogram(0, 2, 2), None, crs, transform, 4)
-        if len(z_threshs) == 1:
-          summary_table = summary_table.filter(ee.Filter.notNull(['histogram']))
-          summary_table = summary_table.map(lambda i:toPct(i,'histogram',bns[0]))
-        
-        else:
-          for bn in bns:
-            summary_table = summary_table.filter(ee.Filter.notNull([bn]))
-            summary_table = summary_table.map(lambda i:toPct(i,bn,bn))
-
-        #Summarize the pct of each area mapped as water
-        summary_table = waterMask.reduceRegions(summary_table, ee.Reducer.fixedHistogram(0, 2, 2), None, crs, transform, 4)
-        summary_table = summary_table.map(lambda i:toPct(i,'histogram','Pct_Water'))
-        
-        summary_table = dirty_z.reduceRegions(summary_table, ee.Reducer.mean(), None, crs, transform, 4)
-        summary_table = summary_table.map(lambda f: f.set('AB_Mean_Z',f.get('mean')))
-    
-        #Export output table
-        output_table_name = '{}_HAB_Summary_Table_yr{}_m{}'.format(studyAreaName,analysisYear,month)
-        output_z_name = '{}_HAB_Z_yr{}_m{}'.format(studyAreaName,analysisYear,month)
-        task_list.append(output_table_name)
-        t = ee.batch.Export.table.toAsset(summary_table,\
-                  description=output_table_name,\
-                  assetId=hab_summary_table_folder + '/'+output_table_name)
-        t.start()
-       
-        #Set up the z score raster for export and export it
-        dirty_z_for_export = dirty_z.multiply(1000).int16().set({'system:time_start':ee.Date.fromYMD(analysisYear,month,1).millis(),
-                                                                  'year':analysisYear,
-                                                                  'month':month,
-                                                                  'studyAreaName':studyAreaName,
-                                                                  'zThreshs':','.join([str(z) for z in z_threshs])})
-        task_list.append(output_z_name)
-        t = ee.batch.Export.image.toAsset(dirty_z_for_export.clip(saBounds), 
-                      description = output_z_name, 
-                      assetId = hab_z_imageCollection + '/'+ output_z_name, 
-                      pyramidingPolicy = {'.default':'mean'}, 
-                      dimensions = None, 
-                      region = None, 
-                      scale = None, 
-                      crs = crs, 
-                      crsTransform = transform, 
-                      maxPixels = 1e13)
-        print('Exporting:',output_z_name)
-        print(t)
-        t.start()
-  return task_list
-     
-############################################################################
-#Make all assets public
-def makeTablesPublic(table_dir):
-  tables = ee.data.getList({'id':table_dir})
-  for table in tables:
-      table = table['id']
-      print('Making public: ',table)
-      ee.data.setAssetAcl(table, json.dumps({u'writers': [], u'all_users_can_read': True, u'readers': []}))
-###############################################################
-def limitThreads(limit):
-  while threading.activeCount() > limit:
-    time.sleep(1)
-    print(threading.activeCount(),'threads running')
-
-#Function to summarize output algal bloom tables over multiple stats and z thresholds simultaneously
-def batchSummarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMonth,endMonth,summary_areas_dict,states = ['WA','OR'],z_threshs = [1],pct_HAB_threshold = 5,unique_area_field = 'UNID',viewer_template = 'HAB_Mapper_Viewer_Template.html'):
-  for z_thresh in z_threshs:
-    for state in states:
-      tt = threading.Thread(target = summarizeTables, args = (input_table_dir,output_table_dir,startYear,endYear,startMonth,endMonth,summary_areas_dict,[state],z_thresh,pct_HAB_threshold,unique_area_field,viewer_template))
-      tt.start()
-      time.sleep(0.1)
-      limitThreads(4)
-  limitThreads(1)
-###############################################################
-#Simplify tables
-def summarizeTables(input_table_dir,output_table_dir,startYear,endYear,startMonth,endMonth,summary_areas_dict,states = ['WA','OR'],z_thresh = 1,pct_HAB_threshold = 5,unique_area_field = 'UNID',viewer_template = 'HAB_Mapper_Viewer_Template.html'):
-  #Potential fields available
-  # keep_fields = ['ADMINFORES', 'AreaSqKm', 'DISTRICTNA', 'DISTRICTNU', 'DISTRICTOR', 'Elevation', 'FCode', 'FDate', 'FID_FS_Bou', 'FID_S_USA_', 'FID_WA_FS_', 'FID_WA_Nam', 'FORESTNAME', 'FORESTNUMB', 'FORESTORGC', 'FType', 'GIS_ACRES', 'GIS_ACRE_1', 'GNIS_ID', 'GNIS_Name', 'OBJECTID', 'Permanent_', 'RANGERDIST', 'REGION', 'REGION_1', 'ReachCode', 'Resolution', 'SHAPE_AR_1', 'SHAPE_LEN', 'SHAPE__Are', 'SHAPE__Len', 'Shape_Area', 'Shape_Leng', 'Visibility', 'state']
-  #Specify which fields are kept in the summarized table
-  keep_fields = ['UNID','state','REGION','FORESTNAME','GNIS_Name']
-
-  state_dict = {'WA':'Washington','OR':'Oregon','WY':'Wyoming'}
-
-  month_dict = {1:'January',2:'February',3:'March',4:'April',5:'May',6:'June',7:'July',8:'August',9:'September',10:'October',11:'November',12:'December'}
-
-  #Set up output dir
-  if not os.path.exists(output_table_dir):os.makedirs(output_table_dir)
-
-  #Get date ranges
-  years = range(startYear,endYear+1)
-  months = range(startMonth,endMonth+1)
-
-  #Filter available tables
-  print('Reading in tables')
-  tables = ee.data.getList({'id':input_table_dir})
-  tables = [i['id'] for i in tables]
-  tables = [i for i in tables if i.split('/')[-1].split('_')[0] in states]
-  tables = [i for i in tables if int(i.split('/')[-1].split('_yr')[-1].split('_')[0]) in years]
-  tables = [i for i in tables if int(i.split('/')[-1].split('_m')[-1]) in months]
-  
-  z_thresh_padded =  f'{int(z_thresh*100):03}' 
-  ab_field = 'AB_Pct_Z_' +z_thresh_padded
-  #Handle creating a unid to summarize across
-  #Currently Wyoming has a different pair of fields needed than WA and
-  def getUNID(t,state):
-    if state == 'WY':
-      return t.set('UNID',ee.String(t.get('RANGERDIST')).cat('_').cat(ee.String(t.get('ReachCode'))))
+    # Handle the need for a good number of years for TDOM (temporal dark outlier mask cloud shadow masking) needs to work well
+    if water_endYear- water_startYear < 3:
+        water_startYearT,water_endYearT = water_startYear-2,water_endYear+2
     else:
-      return t.set('UNID',ee.Number(t.get('FID_S_USA_')).format().cat('_').cat(ee.Number(t.get('FID_{}_FS_'.format(state))).format()))
+        water_startYearT,water_endYearT = water_startYear,water_endYear
     
-  #Read in tables and set up a UNID
-  def getTable(table_name):
-    f = ee.FeatureCollection(table_name)
-    
-    state = table_name.split('/')[-1].split('_')[0]
-    f = f.map(lambda ft: ft.set({'state':state}))
-    f = f.map(lambda t:getUNID(t,state))
-    f = f.map(lambda t: t.set('is_hab',ee.Number(t.get(ab_field)).gt(pct_HAB_threshold)))
-    f = f.map(lambda t: t.set('is_not_hab',ee.Number(t.get(ab_field)).lte(pct_HAB_threshold)))
+    # Get the S2 imagery
+    water_comp =  getImagesLib.getProcessedSentinel2Scenes(studyArea,water_startYearT,water_endYearT,water_startJulian,water_endJulian,resampleMethod='bicubic',convertToDailyMosaics = False,cloudProbThresh=20)
 
-    # n_featues = f.size().getInfo()
-    # n_unids = f.aggregate_histogram('UNID').keys().length().getInfo()
-    # print('N features/UNIDs{}:'.format(table_name),n_featues,n_unids)
+    # Filter the imagery back to the specified years if it had to be extended for TDOM to work
+    water_comp = water_comp.filter(ee.Filter.calendarRange(water_startYear,water_endYear,'year'))
 
-    return f
+    # Get a hillshade
+    mean_azimuth = water_comp.reduceColumns(ee.Reducer.mean(),['MEAN_INCIDENCE_AZIMUTH_ANGLE_B8A']).get('mean')
+    mean_zenith = water_comp.reduceColumns(ee.Reducer.mean(),['MEAN_INCIDENCE_ZENITH_ANGLE_B8A']).get('mean')
+    hillshade = ee.Terrain.hillshade(ned, mean_azimuth, mean_zenith).rename(['hillshade'])
 
-  tables = list(map(getTable,tables))
-  tables = ee.FeatureCollection(tables).flatten()#.sort('date')
+    # Add relevant indices
+    water_comp = water_comp.map(getImagesLib.addTCAngles)
+    water_comp = water_comp.map(getImagesLib.HoCalcAlgorithm2).median()
+    water_mask = getImagesLib.simpleWaterMask(water_comp,0).rename(['water_mask'])
 
-  
-  
-  #Read in state study areas for getting geometry from and add UNID
-  print('Reading in summary area spatial info')
-  study_areas = list(map(lambda s:ee.FeatureCollection(summary_areas_dict[s]).map(lambda f:getUNID(f,s)),states))
-  study_areas = ee.FeatureCollection(study_areas).flatten()
+    water_comp = ee.Image.cat([water_comp,ned,slope,aspect,water_mask,hillshade,tpi_29,tpi_59])
+    water_comp = water_comp.select(pred_bands)
 
-  #Select fields to keep
-  study_areas = study_areas.select(keep_fields)
+    # Add layer to map if specified
+    if addToMap:
+        Map.addLayer(slope.reproject(crs,transform),{'palette':'00F,F00'},'Slope',False)
+        Map.addLayer(aspect.reproject(crs,transform),{'palette':'00F,F00'},'Aspect',False)
+        Map.addLayer(tpi_29.reproject(crs,transform),{'min':-50,'max':50,'palette':'00F,888,F00'},'TPI 29',False)
+        Map.addLayer(tpi_59.reproject(crs,transform),{'min':-50,'max':50,'palette':'00F,888,F00'},'TPI 59',False)
 
-  #Convert to geojson and get the features
-  study_areas_geojson = study_areas.getInfo()
-  study_areas = study_areas_geojson['features']
+        Map.addLayer(water_comp.reproject(crs,transform),getImagesLib.vizParamsFalse,'Water Comp {}'.format(nameEnd),False)
+        Map.addLayer(hillshade,{},'Hillshade',False)
+        Map.addLayer(water_mask.selfMask().reproject(crs,transform),{'palette':'00F'},'Simple Water Mask {}'.format(nameEnd),False)
 
-  #Summarize all the tables using several fields and reducers
-  print('Summarizing tables')
-  stats = tables.reduceColumns(**{
-    'selectors': ['UNID','is_hab','is_not_hab',ab_field,'AB_Mean_Z','Pct_Water'],
-    'reducer':ee.Reducer.max()
-    .combine(ee.Reducer.sum(),None,True)
-    .combine(ee.Reducer.mean(),None,True)
-    .repeat(5)
-    .group(**{
-      'groupField': 0,
-      'groupName': 'UNID',
-    })}).get('groups')
+    return water_comp
+####################################################################################################
+# Function go get a RF supervised classification model of snow/ice, water, and other
+# This was developed to avoid commiting water over water-saturated snow and ice that is common in early summer in higher elevations when using the getImagesLib.simpleWaterMask algorithm
+# Uses training data manually created in the GEE Playground: https://code.earthengine.google.com/?scriptPath=users%2Faaronkamoske%2FAlgalBlooms%3AWater_Training.js
+def getSupervisedWaterModel(water_training_points,water_startYear=2018,water_endYear=2022,water_startJulian=213,water_endJulian=229,crs = getImagesLib.common_projections['NLCD_CONUS']['crs'],transform = [10,0,-2361915.0,0,-10,3177735.0],pred_bands = ['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI', 'elevation','slope', 'aspect', 'hillshade', 'tpi_29', 'tpi_59'],output_dir = r'Q:\Algal_detection_GEE_work\Supervised_Method\Outputs' ,nTrees=250):
+    if not os.path.exists(output_dir):os.makedirs(output_dir)
+    # Set up some output filenames
+    out_training = os.path.join(output_dir,'Water_Training_yr{}-{}_jd{}-{}.geojson'.format(water_startYear,water_endYear,water_startJulian,water_endJulian))
+    out_model = os.path.join(output_dir,'Water_Model_nTrees{}_yr{}-{}_jd{}-{}.txt'.format(nTrees,water_startYear,water_endYear,water_startJulian,water_endJulian))
 
-  #Extract the proper fields/stats and give it a descriptive field name
-  def extractSummary(stat):
-    stat = ee.Dictionary(stat)
-    max = ee.List(stat.get('max'))
-    sum = ee.List(stat.get('sum'))
-    mean = ee.List(stat.get('mean'))
-    is_hab = ee.Number(max.get(0)).byte()
-    pos_ct = ee.Number(sum.get(0)).byte()
-    neg_ct = ee.Number(sum.get(1)).byte()
-    pct_water = ee.Number(mean.get(4)).format('%.2f')
-    max_pct_hab = ee.Number(max.get(2)).format('%.2f')
-    max_mean_z = ee.Number(max.get(3)).format('%.2f')
-    out_dict = ee.Dictionary({
-      'UNID':stat.get('UNID'),
-      'A_Any_Pos':is_hab,
-      'A_Pos_Ct':pos_ct,
-      'A_Neg_Ct':neg_ct,
-      'Pct_Water':pct_water,
-      'A_Max_Pct':max_pct_hab,
-      'A_Max_Zmean':max_mean_z
-      })
-    return out_dict
+    # Get the model if it doesn't already exist
+    if not os.path.exists(out_model):
 
-  out = ee.List(stats).map(extractSummary).getInfo()
+        # Read in water training points from geojson to GEE featureCollection
+        o = open(water_training_points)
+        water_training = json.load(o)
+        o.close()
+        water_training = ee.FeatureCollection(water_training)
 
-  #Function to join the summary dictionary to the feature from the original summary areas
-  def joinGeo(stat):
-    f = [i for i in study_areas if i['properties']['UNID'] == stat['UNID']][0]
-    f['properties'].update(stat)
-    return f
-  
-  #Join the geometry and keep fields from original study areas to the summary stats
-  print('Joining summary stats to spatial info')
-  out_geo = list(map(joinGeo,out))
+        # Get a predictor stack for the area the points cover
+        water_comp = getWaterPredictors(water_training.geometry().bounds(),water_startYear,water_endYear,water_startJulian,water_endJulian,pred_bands)
 
-  #Finalize the geojson formatting
-  tables_json = study_areas_geojson
-  tables_json['features'] = out_geo
+        # Extract the training data predictor values if they don't already exist
+        if not os.path.exists(out_training):
+            Map.addLayer(water_training,{'layerType':'geeVector'},'Water Training',True)
 
+            training = water_comp.reduceRegions(water_training, ee.Reducer.first(), None, crs, transform, 4)
+            training=training.filter(ee.Filter.notNull(pred_bands)).getInfo()
+            o = open(out_training,'w')
+            o.write(json.dumps(training))
+            o.close()
 
-  out_name = os.path.join(output_table_dir,'Algal_Bloom_Summaries_{}_yrs{}-{}_mths{}-{}_zthresh{}'.format('-'.join(states),startYear,endYear,startMonth,endMonth,z_thresh_padded))
+        # Open the saved water training data
+        o = open(out_training)
+        water_training = json.load(o)
+        o.close()
 
-  print('Writing final outputs')
-  #Write out combined geojson
-  out_name_geojson = out_name+ '.geojson'
-  o = open(out_name_geojson,'w')
-  o.write(json.dumps(tables_json))
-  o.close()
+        # Train the RF model
+        rf= ee.Classifier.smileRandomForest(nTrees)
+        rf=rf.train(water_training, 'Cls', pred_bands)
 
+        # Get some model info
+        getRFModelInfoClassification(rf,'Water_Classification',nTrees,['Snow/Ice','Water','Other'],output_dir)
 
-  #Convert to csv
-  out_name_csv = out_name + '.csv'
-  tables = [i['properties'] for i in tables_json['features']]
-  header = ','.join([str(i) for i in list(tables[0].keys())])
-  out = [header]
-  for table in tables:out.append(','.join([str(i) for i in list(table.values())]))
-  out = '\n'.join(out)
-  o = open(out_name_csv,'w')
-  o.write(out)
-  o.close()
-
-  #Set up self-contained viewer
-  out_name_html = out_name+'_viewer.html'
-  
-  #Set up different fields that need replaced in the template
-  title = ' '.join(os.path.basename(out_name).split('_'))
- 
-  geojson_title = title
-  title = title + ' Viewer'
-  # print('Theyre equal:',startYear==endYear)
-  if startYear == endYear:
-    year_range_string = '{}'.format(startYear)
-  elif endYear - startYear == 1:
-    year_range_string = '{} and {}'.format(startYear,endYear)
-  else:
-    year_range_string = 'years {} to {}'.format(startYear,endYear)
-
-  if len(states) == 1:
-    states_list_string = state_dict[states[0]]
-
-  elif len(states) == 2:
-    states_list_string = state_dict[states[0]] + ' and ' + state_dict[states[1]]
-
-  else:
-    states_list_string = ', '.join([state_dict[i] for i in states[:-1]]) + ', and '+ state_dict[states[-1]]
-   
-
-  replace_dict = {'{TITLE}':title,
-                  '{RAW_GEOJSON}':json.dumps(tables_json),
-                  '{START_MONTH}':month_dict[startMonth],
-                  '{END_MONTH}':month_dict[endMonth],
-                  '{YEAR_RANGE}':year_range_string,
-                  '{startYear}':str(startYear),
-                  '{endYear}':str(endYear),
-                  '{startMonth}':str(startMonth),
-                  '{endMonth}':str(endMonth),
-                  '{STATES}':str(states),
-                  '{PCT_THRESH}':str(pct_HAB_threshold),
-                  '{GEOJSON_TITLE}':'geojson_title',
-                  '{Z_THRESH}':str(z_thresh),
-                  '{Z_PCTL}':'80',
-                  '{STATES_LIST}':states_list_string
-                  }
-
-  mew.setup_viewer(out_name_html, replace_dict, viewer_template)
-
-  #Convert geojson to shapefile
-  out_name_shp = out_name+'.shp'
-  srcDS = gdal.OpenEx(out_name_geojson)
-  ds = gdal.VectorTranslate(out_name_shp, srcDS, format='ESRI Shapefile' ,options = '-skipfailures')
-
-############################################################################
-
-dirty_lakes = {}
-dirty_lakes['billy_chinook'] = ee.Geometry.Polygon(\
-        [[[-121.48239392202757, 44.62035796573114],\
-          [-121.48239392202757, 44.509308410535326],\
-          [-121.2262751476135, 44.509308410535326],\
-          [-121.2262751476135, 44.62035796573114]]], None, False)
+        # Save the model to a text file
+        saveModel(rf,out_model,delimiter='split_trees_here')
         
-dirty_lakes['odell_lake'] = ee.Geometry.Polygon(\
-        [[[-122.0549625378963, 43.59540724921347],\
-          [-122.0549625378963, 43.547151047382215],\
-          [-121.95436897100177, 43.547151047382215],\
-          [-121.95436897100177, 43.59540724921347]]], None, False)
-dirty_lakes['wy_dirty_lake_combo'] = ee.Geometry.MultiPolygon(\
-       [[[[-108.22911901517031, 43.41087661396606],\
-          [-108.22911901517031, 43.18224132965033],\
-          [-108.13642187161562, 43.18224132965033],\
-          [-108.13642187161562, 43.41087661396606]]],\
-        [[[-109.31414671598651, 44.50635067370683],\
-          [-109.31414671598651, 44.44044923506513],\
-          [-109.15587492643573, 44.44044923506513],\
-          [-109.15587492643573, 44.50635067370683]]],\
-        [[[-105.24916665039864, 41.18222447048324],\
-          [-105.24916665039864, 41.17072504799633],\
-          [-105.21994130097237, 41.17072504799633],\
-          [-105.21994130097237, 41.18222447048324]]],\
-        [[[-110.00372861158245, 43.69250055304031],\
-          [-110.00372861158245, 43.68871474128848],\
-          [-109.99746297132366, 43.68871474128848],\
-          [-109.99746297132366, 43.69250055304031]]],\
-        [[[-110.68328269422415, 42.011520615832595],\
-          [-110.68328269422415, 41.96418338823834],\
-          [-110.64277060926321, 41.96418338823834],\
-          [-110.64277060926321, 42.011520615832595]]],\
-        [[[-105.73231371755158, 41.900976006257636],\
-          [-105.73231371755158, 41.86340128602617],\
-          [-105.70553454274689, 41.86340128602617],\
-          [-105.70553454274689, 41.900976006257636]]]], None, False)
-dirty_lakes['wy_turbid_lake_combo'] = ee.Geometry.MultiPolygon(\
-       [[[[-108.64299538824541, 43.21152592379036],\
-          [-108.64299538824541, 43.155449940915105],\
-          [-108.56197121832354, 43.155449940915105],\
-          [-108.56197121832354, 43.21152592379036]]],\
-        [[[-111.03544902486978, 41.505363985440525],\
-          [-111.03544902486978, 41.44465706685474],\
-          [-111.00249004049478, 41.44465706685474],\
-          [-111.00249004049478, 41.505363985440525]]],
-        [[[-104.92643828230109, 44.39755383373756],\
-          [-104.92643828230109, 44.321459875907976],\
-          [-104.7458505137464, 44.321459875907976],\
-          [-104.7458505137464, 44.39755383373756]]],\
-        [[[-109.39235326037969, 42.234835938460854],\
-          [-109.39235326037969, 42.21411566114201],\
-          [-109.34772130237188, 42.21411566114201],\
-          [-109.34772130237188, 42.234835938460854]]],\
-        [[[-109.47472392655484, 42.29657504761792],\
-          [-109.47472392655484, 42.245002911853064],\
-          [-109.40829097367399, 42.245002911853064],\
-          [-109.40829097367399, 42.29657504761792]]]], None, False)
+
+    # Read in the saved water model
+    rf2 = openModel(out_model,delimiter='split_trees_here')
+    return rf2
+####################################################################################################
+# Function to get a saved water RF model
+def getCachedWaterModel(output_dir,model_name=None):
+  if model_name == None:
+    model_name = glob.glob(os.path.join(output_dir),'Water_Model_nTrees*.txt')[0]
+  print('Opening cached water model:',model_name)
+  o = open(model_name,'r')
+  trees = o.read().split('split_trees_here')
+  o.close()
+  rf2 = ee.Classifier.decisionTreeEnsemble(trees)
+  return rf2
+####################################################################################################
+# Function to apply a water classification model
+def applyWaterClassification(output_dir,model,studyArea,water_startYear=2018,water_endYear=2022,water_startJulian=213,water_endJulian=229,crs = getImagesLib.common_projections['NLCD_CONUS']['crs'],transform = [10,0,-2361915.0,0,-10,3177735.0],pred_bands = ['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI', 'elevation','slope', 'aspect',  'hillshade', 'tpi_29', 'tpi_59'],addToMap=False,water_contract_pixels=1):
+
+    # Get a saved model if one is not provided
+    if model == None:
+        model = getCachedWaterModel(output_dir)
+
+    # Set up a common ending name based on the date params
+    nameEnd = 'yr{}-{} jd{}-{}'.format(water_startYear,water_endYear,water_startJulian,water_endJulian)
+
+    # Get the water predictors for the specified dates
+    water_comp = getWaterPredictors(studyArea,water_startYear,water_endYear,water_startJulian,water_endJulian,pred_bands,addToMap)
+
+    # Apply the model
+    predicted = water_comp.classify(model)
+    predicted = predicted.rename(['SnowIce_Water'])
+
+    # Pull out just the water class and contract it by n pixels
+    water = predicted.eq(2).focal_min(water_contract_pixels).rename(['Water'])
+    waterLegendDict = {'Snow/Ice':'0FF','Water':'00F'}
+
+    # Add output to the map if specified
+    if addToMap:
+        Map.addLayer(predicted.updateMask(predicted.lte(2)).reproject(crs,transform),{'min':1,'max':2,'palette':'0FF,00F','layerType':'geeImage','classLegendDict':waterLegendDict},'Water Classification {}'.format(nameEnd))
+    
+    # Return the composite along with the classified output and just the water mask
+    return water_comp.addBands(predicted).addBands(water)
+####################################################################################################
+# Function to get a clean waterbody sample
+# Takes clean waterbody centroid points provided by Paul Marone, filters out ones that are likely not actually clean, gets a late summer composite, finds the areas covered in water, and derives a sample over those water bodies
+# Current workflow does convert the shapefile provided by Paul to geojson using ogr2ogr (not included in this script)
+def prepareCleanTrainingData(clean_points,clean_startYear = 2018,clean_endYear = 2022,clean_startJulian = 213,clean_endJulian = 229,nSamples = 150,crs = getImagesLib.common_projections['NLCD_CONUS']['crs'],transform = [10,0,-2361915.0,0,-10,3177735.0],pred_bands = ['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI','elevation'],water_pred_bands=['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI', 'elevation','slope', 'aspect',  'hillshade', 'tpi_29', 'tpi_59'],output_dir = r'Q:\Algal_detection_GEE_work\Supervised_Method\Outputs',water_model=None):
+    if not os.path.exists(output_dir):os.makedirs(output_dir)
+    # Load the clean waterbody centroid points
+    o = open(clean_points)
+    clean_points = ee.FeatureCollection(json.load(o))
+    o.close()
+
+    # Filter out points likely to not be clean
+    clean_points = ee.FeatureCollection(clean_points).filter(ee.Filter.stringContains('Control','Bloom Recorded').Not())
+    clean_points = ee.FeatureCollection(clean_points).filter(ee.Filter.stringContains('Control','Bloom Whitnessed').Not())
+    clean_points = ee.FeatureCollection(clean_points).filter(ee.Filter.stringContains('Control','No Bloom Seen').Not())
+    clean_points = ee.FeatureCollection(clean_points).filter(ee.Filter.stringContains('Control','Sampled No Bloom').Not())
+
+    # Add the centroid points to the map
+    Map.addLayer(clean_points.map(lambda f:ee.Feature(f).buffer(15).bounds()),{'layerType':'geeVector'},'Clean Water Body Centroids')
+
+    # Get the bounds of all the points for a study area
+    clean_studyArea = clean_points.geometry().bounds(500,'EPSG:5070').buffer(2000)
+
+    # Get the water mask and composite 
+    water_comp = applyWaterClassification(output_dir,water_model,clean_studyArea,clean_startYear,clean_endYear,clean_startJulian,clean_endJulian,crs,transform,water_pred_bands,addToMap=False,water_contract_pixels=3)
+
+    # Extract the wtaer mask and mask out the composite to its extent
+    water = water_comp.select(['Water']).selfMask()
+    compWater = water_comp.select(pred_bands).updateMask(water)
+ 
+    # Add the composite to the map
+    Map.addLayer(water_comp.reproject(crs,transform),getImagesLib.vizParamsFalse,'Clean Comp {}-{}'.format(clean_startYear,clean_endYear),False)
+    Map.addLayer(water.reproject(crs,transform),{'palette':'00F','classLegendDict':{'Water':'00F'}},'Clean Water Mask {}-{}'.format(clean_startYear,clean_endYear),False)
+
+    # Get the ids of each point to then extract
+    ids  = clean_points.aggregate_histogram('system:index').keys().getInfo()
+    
+    # Extract each water body by centroid id
+    for id in ids:
+        # Set up the output filename
+        of = os.path.join(output_dir,'Clean_Training_Samples_id{}_n{}_yr{}-{}_jd{}-{}.geojson'.format(id,nSamples,clean_startYear,clean_endYear,clean_startJulian,clean_endJulian))
+
+        if not os.path.exists(of):
+            print('Extracting clean data for point id:',id)
+
+            # Get the point for the id
+            clean_pt = clean_points.filter(ee.Filter.eq('system:index',id))
+
+            # Get a generous study area aroudn the point
+            clean_point_b = clean_pt.geometry().bounds(500,'EPSG:5070').buffer(2000)
+            
+            # Convert the water mask to vector and then filter it down to the one the point falls within
+            water_v = water.clip(clean_point_b).reduceToVectors(scale = 30).filterBounds(clean_pt)
+
+            # Create a sample within that waterbody outline
+            pts = ee.FeatureCollection.randomPoints(water_v, nSamples, 1, 50)
+
+            # Extract the predictor values
+            training = compWater.reduceRegions(pts, ee.Reducer.first(), None, crs, transform, 4)
+            training=training.filter(ee.Filter.notNull(pred_bands)).getInfo()
+
+            # Write the output
+            o = open(of,'w')
+            o.write(json.dumps(training))
+            o.close()
+####################################################################################################
+# Function to extract the HCB predictor values for each unique sample collection date
+# Gets a composite for a +- 2 week window and extracts those values
+def extractHCBPredictorValues(hcb_fc,dateProp,crs,transform,pred_bands,water_pred_bands,water_model,d):
+    # Get date window 
+    startDate = ee.Date(d).advance(-2,'week')
+    endDate = ee.Date(d).advance(2,'week')
+    startYear = int(startDate.get('year').getInfo())
+    endYear = int(endDate.get('year').getInfo())
+    startJulian = int(startDate.format('DDD').getInfo())
+    endJulian = int(endDate.format('DDD').getInfo())
+
+    # Filter HCB data to the provided date
+    hcb_d = hcb_fc.filter(ee.Filter.eq(dateProp,d))
+
+    # Get a water mask and composite for those dates
+    water_comp = applyWaterClassification(output_dir,water_model,hcb_d,startYear,endYear,startJulian,endJulian,crs,transform,addToMap=False)
+    water = water_comp.select(['Water']).selfMask()
+    compWater = water_comp.select(pred_bands).updateMask(water)
+    
+    # Extract the values for a 5x5 pixel window mean around the point (this is necessary since many samples are right on the shorline)
+    t = compWater.focalMean(2.5).reduceRegions(hcb_d, ee.Reducer.first(), None, crs, transform, 4)
+    return t
+####################################################################################################
+# Function to write out the predictor table from GEE to geojson
+def writePredictorTables(featureCollection,filename):
+    out_f = ee.FeatureCollection(featureCollection).getInfo()
+    o = open(filename,'w')
+    o.write(json.dumps(out_f))
+    o.close()
+####################################################################################################
+# Function to extract HCB samples by sets
+# Originally written to extract using multiple threads/processes, but that approach doesn't work. This now extracts by groups of samples
+def batchExtractHCBPredictorTables(hcb_fc,dateProp,crs,transform,pred_bands,water_pred_bands,output_dir,water_model):
+    if not os.path.exists(output_dir):os.makedirs(output_dir)
+
+    # Get the dates and group them into 20 groups
+    dates = hcb_fc.aggregate_histogram(dateProp).keys().getInfo()
+    date_sets = new_set_maker(dates,20)
+
+    # Iterate across each group and extract the predictor tables
+    date_set_i = 1
+    for date_set in date_sets:
+        of = os.path.join(output_dir,'HCB_Training_{}.geojson'.format(date_set_i))
+        if not os.path.exists(of):
+            out_f = []
+            for d in date_set:
+                t = extractHCBPredictorValues(hcb_fc,dateProp,crs,transform,pred_bands,water_pred_bands,water_model,d)
+                out_f.append(t)
+            out_f = ee.FeatureCollection(out_f).flatten()
+            writePredictorTables(out_f,of)
+        date_set_i +=1
+####################################################################################################
+# Function to get model info for a RF regression model
+# Includes the variable importance and out of bag error (bottom row)
+def getRFModelInfoRegression(rf,name,nTrees,table_dir):
+    out_importance_filename = os.path.join(table_dir,'{}_nTrees{}_Var_Importance.csv'.format(name,nTrees))
+    if not os.path.exists(out_importance_filename):
+        # Get the importance and OOB error
+        exp = ee.Dictionary({'importance':rf.explain().get('importance'),\
+                                'oobError':rf.explain().get('outOfBagErrorEstimate')}).getInfo()
+
+        obError = exp['oobError']
+
+        # Convert the importance into a comma delimited set of rows
+        importance = list(zip(list(exp['importance'].keys()),list(exp['importance'].values())))
+        importance = sorted(importance, key=lambda row: row[1]*-1)
+        importance_lines = 'Name,Importance\n'
+        for line in importance:
+            importance_lines+=','.join([str(i) for i in line])+'\n'
+
+        # Add in the OOB Error
+        importance_lines+='OOB Error,{}\n'.format(obError)
+        
+        # Write output csv
+        o = open(out_importance_filename,'w')
+        o.write(importance_lines)
+        o.close()
+####################################################################################################
+# Function to get RF classification model error matrix, oob accuracy, and variable importance
+def getRFModelInfoClassification(rf,name,nTrees,class_names,table_dir):
+
+    # Set up output filenames
+    out_table_filename = os.path.join(table_dir,'{}_nTrees{}_OOB_Error_Matrix.csv'.format(name,nTrees))
+    out_importance_filename = os.path.join(table_dir,'{}_nTrees{}_Var_Importance.csv'.format(name,nTrees))
+
+    if not os.path.exists(out_table_filename) or not os.path.exists(out_importance_filename):
+
+        # Get the confusion matrix, kappa, and OOB error
+        cm = rf.confusionMatrix()
+        exp = ee.Dictionary({'importance':rf.explain().get('importance'),\
+                                'kappa':cm.kappa(),\
+                                'oobError':rf.explain().get('outOfBagErrorEstimate'),
+                                'cm':cm}).getInfo()
+        oobAcc = 1-exp['oobError']
+        kappa = exp['kappa']
+        cm = exp['cm']
+
+        # Convert the importance to comma delimited lines
+        importance = list(zip(list(exp['importance'].keys()),list(exp['importance'].values())))
+        importance = sorted(importance, key=lambda row: row[1]*-1)
+        importance_lines = 'Name,Importance\n'
+        for line in importance:
+            importance_lines+=','.join([str(i) for i in line])+'\n'
+        
+        # Convert the confusion matrix to comma delimtied and compute commission and omission error
+        cm = cm[1:]
+        cm = [row[1:] for row in cm]
+
+        allSum = np.sum(cm)
+        diag = []
+        rowAccs = []
+        colAccs = []
+
+        for ri in range(0,len(cm)):
+            row =cm[ri]
+            col = [cm[i][ri] for i in range(0,len(cm))]
+            v = row[ri]
+            diag.append(v)
+            rowSum = np.sum(row)
+            colSum = np.sum(col)
+            rowAcc = v/rowSum
+            colAcc = v/colSum
+            rowAccs.append(rowAcc)
+            colAccs.append(colAcc)
+
+            
+        overall_acc = np.sum(diag)/allSum
+
+        out_lines = ',{},Commission Error (1-n)\n'.format(','.join(class_names))
+        for ri in range(0,len(cm)):
+            out_lines+='{},{},{}\n'.format(class_names[ri],','.join([str(i) for i in cm[ri]]),rowAccs[ri])
+        out_lines+='Omission Error (1-n),{},,\n'.format(','.join([str(i) for i in colAccs]))
+        out_lines+='Overall Accuracy,{}\n'.format(overall_acc)
+        out_lines+='OOB Accuracy,{}\n'.format(oobAcc)
+        out_lines+='Kappa,{}\n'.format(overall_acc)
+       
+
+        # Write output files
+        o = open(out_table_filename,'w')
+        o.write(out_lines)
+        o.close()
+
+        o = open(out_importance_filename,'w')
+        o.write(importance_lines)
+        o.close()
+####################################################################################################
+# Load multiple geojson files as a single GEE featureCollection
+def loadGeoJSON(files):
+    out_fc = []
+    for t in files:
+        o = open(t,'r')
+        out_fc.append(ee.FeatureCollection(json.load(o)))
+        o.close()
+    return ee.FeatureCollection(out_fc).flatten()
+####################################################################################################
+# Function to get the RF algal models
+def getAlgalModels(table_dir,pred_bands,nTrees=100,getError=False):
+
+    # Name of field for algal classes that must be added to the training data
+    training_field = 'HAB'
+
+    # Saved model names
+    class_model = os.path.join(table_dir,'HAB_Classification_RF_Model.txt')
+    count_model = os.path.join(table_dir,'Cell_Count_RF_Model.txt')
+    biovolume_model = os.path.join(table_dir,'BioVolume_RF_Model.txt')
+
+    # Read in HCB and clean training geojson files as GEE featureCollections
+    hcb_training = glob.glob(os.path.join(table_dir,'HCB*.geojson'))
+    clean_training = glob.glob(os.path.join(table_dir,'Clean_*.geojson'))
+    hcb_training_fc = loadGeoJSON(hcb_training)
+    clean_training_fc = loadGeoJSON(clean_training)
+
+    # Set the clean training dependent variable fields to the respective clean values
+    # 1 for classification, and 0 for both regression variables (Count and Biovolume)
+    clean_training_fc = clean_training_fc.map(lambda f:ee.Feature(f).set(training_field,1))
+    clean_training_fc = clean_training_fc.map(lambda f:ee.Feature(f).set('Cyanobacteria Count (cells/mL)',0))
+    clean_training_fc = clean_training_fc.map(lambda f:ee.Feature(f).set('Cyanobacteria Biovolume (um^3)',0))
+    # print(clean_training_fc.first().toDictionary().keys().getInfo())
+    # print('N HCB Points:',hcb_training_fc.size().getInfo())
+    # print('N Clean Points:',clean_training_fc.size().getInfo())
+    # Cyanobacteria Count (cells/mL) > 25000 for threshold
+    # Cyanobacteria Biovolume (um^3)
+    # If failing bin taxa
+
+    # Filter out HCB data to ensure there are observations and the count is > the WY threshold of 25000
+    hcb_training_fc=hcb_training_fc.filter(ee.Filter.notNull(pred_bands))
+    hcb_training_fc=hcb_training_fc.filter(ee.Filter.notNull(['Cyanobacteria Count (cells/mL)']))
+    hcb_training_fc=hcb_training_fc.filter(ee.Filter.notNull(['Cyanobacteria Biovolume (um^3)']))
+    hcb_training_fc = hcb_training_fc.filter(ee.Filter.hasType('Cyanobacteria Count (cells/mL)','float'))
+    hcb_training_fc = hcb_training_fc.filter(ee.Filter.hasType('Cyanobacteria Biovolume (um^3)','float'))
+    hcb_training_fc = hcb_training_fc.filter(ee.Filter.gte('Cyanobacteria Count (cells/mL)',25000))
+
+    # Set the HCB training dependent variable field to the respective algal value
+    hcb_training_fc = hcb_training_fc.map(lambda f:ee.Feature(f).set(training_field,2))
+    
+    # Set up some class names and numbers for classification
+    class_names=['Not HAB','HAB']
+    class_numbers = [1,2]
+
+    Map.addLayer(hcb_training_fc.map(lambda f:ee.Feature(f).buffer(1500).bounds()),{'layerType':'geeVector','strokeColor':'F00'},'HCB Training')
+    Map.addLayer(clean_training_fc.map(lambda f:ee.Feature(f).buffer(15).bounds()),{'layerType':'geeVector'},'Clean Training')
+
+    # Combine the HCB and clean training data
+    training = hcb_training_fc.merge(clean_training_fc)
+    Map.addLayer(training.map(lambda f:ee.Feature(f).buffer(15).bounds()),{'layerType':'geeVector'},'All Training')
+    
+    # Get the RF models for classification, count, and biovolume
+    def getModel(training,training_field,outputMode):
+        rf= ee.Classifier.smileRandomForest(nTrees)
+        rf = rf.setOutputMode(outputMode)
+        rf=rf.train(training, training_field, pred_bands)
+        return rf
+
+    rf_hab = getModel(training,training_field,'CLASSIFICATION')
+    rf_cells=getModel(training,'Cyanobacteria Count (cells/mL)','REGRESSION')
+    rf_vol=getModel(training,'Cyanobacteria Biovolume (um^3)','REGRESSION')
+
+    # Save models (can only save classification model so all models are retrained each time currently)
+    saveModel(rf_hab,class_model)
+    # saveModel(rf_cells,count_model)
+    # saveModel(rf_vol,biovolume_model)
+
+    # Get error info
+    if getError:
+        getRFModelInfoClassification(rf_hab,'HAB_Classification',nTrees,class_names,table_dir)
+        getRFModelInfoRegression(rf_cells,'Cell_Count',nTrees,table_dir)
+        getRFModelInfoRegression(rf_vol,'Biovolume',nTrees,table_dir)
+    
+    # Return the models
+    return rf_hab,rf_cells,rf_vol,class_names,class_numbers
+####################################################################################################
+# Function to apply an algal model created in the functions above
+def applyAlgalModels(rf_hab,rf_cells,rf_vol,water_model,class_names,class_numbers,applyStudyArea,applyYear = 2022,applyStartJulian = 190, applyEndJulian = 210,pred_bands = ['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI','elevation'],water_pred_bands=['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI', 'elevation','slope', 'aspect',  'hillshade', 'tpi_29', 'tpi_59'],crs = getImagesLib.common_projections['NLCD_CONUS']['crs'],transform = [10,0,-2361915.0,0,-10,3177735.0],output_dir = r'Q:\Algal_detection_GEE_work\Supervised_Method\Outputs',export_outputs=False,output_asset_collection='projects/gtac-algal-blooms/assets/outputs/HAB-RF-Images',studyAreaName='WY'):
+
+    # Get a common name ending for the dates provided
+    applyStartDate = ee.Date.fromYMD(applyYear,1,1).advance(applyStartJulian,'day')
+    
+    applyEndDate = ee.Date.fromYMD(applyYear,1,1).advance(applyEndJulian,'day')
+    
+    nameEnd = 'yr{}_{}_{}'.format(applyYear,applyStartDate.format('MM-dd').getInfo(),applyEndDate.format('MM-dd').getInfo())
+
+    outputAssetName = 'RF-Algal-Stack_{}_{}'.format(studyAreaName,nameEnd)
+    
+    # Get the water mask and composite for the dates
+    water_comp = applyWaterClassification(output_dir,water_model,applyStudyArea,applyYear,applyYear,applyStartJulian,applyEndJulian,crs,transform,water_pred_bands,addToMap=False)
+    water = water_comp.select(['Water']).selfMask()
+    comp = water_comp.select(pred_bands)
+
+    # Mask composite to extent of water
+    compWater = comp.updateMask(water)
+
+    # Add layers to map
+    Map.addLayer(applyStudyArea,{},'Apply Study Area',False)
+    Map.addLayer(comp.reproject(crs,transform),getImagesLib.vizParamsFalse,'Median S2 {}'.format(nameEnd),False)
+    Map.addLayer(water.selfMask().reproject(crs,transform),{'palette':'00D'},'Median S2 Water {}'.format(nameEnd),False)
+
+    # Apply classification model
+    predicted = compWater.classify(rf_hab)
+    algalLegendDict={'Algal Negative':'00D','Algal Positive':'D00'}
+    # Map.addLayer(predicted.reproject(crs,transform),{'min':class_numbers[0],'max':class_numbers[-1],'palette':'00D,D00','layerType':'geeImage','classLegendDict':algalLegendDict},'AB Classified {}'.format(nameEnd),False)
+
+    def getMapStretch(predicted,nameStart,map_stretch_pctls = [5,95]):
+        stats_filename = os.path.join(output_dir,'Algal_{}_Stats_{}-{}_{}.txt'.format(nameStart,map_stretch_pctls[0],map_stretch_pctls[1],nameEnd))
+        if not os.path.exists(stats_filename):
+            print('Computing output image stats:',stats_filename)
+            predicted_stats= [str(int(i)) for i in predicted.reduceRegion(ee.Reducer.percentile(map_stretch_pctls), applyStudyArea, 3000,tileScale=4).values().getInfo()]
+            o = open(stats_filename,'w')
+            o.write(','.join(predicted_stats))
+            o.close()
+        o = open(stats_filename,'r')
+        stats = o.read().split(',')
+        o.close()
+        return [int(i) for i in stats]
+
+    # Apply count regression model
+    cell_predicted = compWater.classify(rf_cells)
+    # cell_predicted_stats = getMapStretch(cell_predicted,'Count')
+    # Map.addLayer(cell_predicted.reproject(crs,transform),{'min':1000000,'max':5000000,'palette':'00D,D00','layerType':'geeImage'},'Cyanobacteria Count (cells/mL) {}'.format(nameEnd),False)
+
+    # Apply biovolume regression model
+    biovolume_predicted = compWater.classify(rf_vol)
+    # biovolume_predicted_stats = getMapStretch(biovolume_predicted,'Biovolume')
+    # Map.addLayer(biovolume_predicted.reproject(crs,transform),{'min':200000000,'max':1000000000,'palette':'00D,D00','layerType':'geeImage'},'Cyanobacteria Biovolume (um3) {}'.format(nameEnd),False)
+
+    if export_outputs:
+        if not aml.ee_asset_exists(output_asset_collection + '/'+ outputAssetName):
+            # Set up outputs for export
+            out_pred_stack = ee.Image.cat([cell_predicted.uint32(),biovolume_predicted.uint32()]).rename(['Count','Biovolume']).set({'system:time_start':applyStartDate.millis(),
+                                        'system:time_end':applyEndDate.millis(),
+                                        'year':applyYear,
+                                        'startJulian':applyStartJulian,
+                                        'endJulian':applyEndJulian,
+                                        'studyAreaName':studyAreaName})
+            # task_list.append(outputAssetName)
+            t = ee.batch.Export.image.toAsset(out_pred_stack.clip(applyStudyArea), 
+                            description = outputAssetName, 
+                            assetId = output_asset_collection + '/'+ outputAssetName, 
+                            pyramidingPolicy = {'AB':'mode','Count':'mean','Biovolume':'mean'}, 
+                            dimensions = None, 
+                            region = None, 
+                            scale = None, 
+                            crs = crs, 
+                            crsTransform = transform, 
+                            maxPixels = 1e13)
+            # print('Exporting:',task_list)
+            print(t)
+            t.start()
+####################################################################################################
+# Divide list into a list of lists length n threads
+def new_set_maker(in_list,threads):
+    out_sets =[]
+    for t in range(threads):
+        out_sets.append([])
+    i =0
+    for il in in_list:
+
+        out_sets[i].append(il)
+        i += 1
+        if i >= threads:
+            i = 0
+    return out_sets
+####################################################################################################
+def limitThreads(limit):
+  while threading.active_count() > limit:
+    time.sleep(2)
+    print(threading.active_count(),'threads running')
+####################################################################################################
+# Wrapper function for it all
+def supervised_algal_mapper(water_training_points,hcb_data,clean_points,\
+clean_startYear = 2018,clean_endYear = 2022,clean_startJulian = 213,clean_endJulian = 229,clean_nSamples = 150,\
+lat='Sampling Latitude', lon='Sampling Longitude',dateProp = 'Sample Date',properties=[],crs = getImagesLib.common_projections['NLCD_CONUS']['crs'],transform = [10,0,-2361915.0,0,-10,3177735.0],pred_bands = ['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI','elevation'],water_pred_bands=['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI', 'elevation','slope', 'aspect',  'hillshade', 'tpi_29', 'tpi_59'],output_dir = r'Q:\Algal_detection_GEE_work\Supervised_Method\Outputs',nTrees=250,getError=False,applyStudyArea=None,applyYears = [2022],applyStartJulians = range(150,200,14),applyNDayWindow = 28,export_outputs=False,output_asset_collection='projects/gtac-algal-blooms/assets/outputs/HAB-RF-Images',studyAreaName='WY'):
+
+    # Get the water RF model
+    water_model = getSupervisedWaterModel(water_training_points,water_startYear=clean_startYear,water_endYear=clean_endYear,water_startJulian=clean_startJulian,water_endJulian=clean_endJulian,crs = crs,transform = transform,pred_bands=water_pred_bands,output_dir =output_dir,nTrees=nTrees)
+    # applyWaterClassification(output_dir,water_model,applyStudyArea,clean_startYear,clean_endYear,clean_startJulian,clean_endJulian,crs,transform,water_pred_bands,addToMap=True)
+  
+    # Get clean training data
+    prepareCleanTrainingData(clean_points,clean_startYear,clean_endYear,clean_startJulian,clean_endJulian,clean_nSamples,crs,transform ,pred_bands,water_pred_bands,output_dir,water_model)
+
+    # Get HCB training data
+    hcb_fc = prepareTrainingData(hcb_data,lat,lon,properties)
+    batchExtractHCBPredictorTables(hcb_fc,dateProp,crs,transform,pred_bands,water_pred_bands,output_dir,water_model)
+
+    # Get algal RF models
+    rf_hab,rf_cells,rf_vol,class_names,class_numbers = getAlgalModels(output_dir,pred_bands,nTrees,getError)
+
+    # Apply algal models
+    for applyYear in applyYears:
+        for applyStartJulian in applyStartJulians:
+            applyEndJulian = applyStartJulian+applyNDayWindow
+            applyAlgalModels(rf_hab,rf_cells,rf_vol,water_model,class_names,class_numbers,applyStudyArea,applyYear,applyStartJulian, applyEndJulian,pred_bands,water_pred_bands,crs,transform,output_dir,export_outputs,output_asset_collection,studyAreaName)
+####################################################################################################
+# Function to view outputs (this function is deprecated by the Bloom-Mapper)
+# Dev: https://dev.wrk.fs.usda.gov/forest-atlas/lcms-viewer/bloom-mapper.html 
+# Prod: https://apps.fs.usda.gov/lcms-viewer/bloom-mapper.html
+def viewExportedOutputs(output_dir,output_asset_collection):
+    ab = ee.ImageCollection(output_asset_collection)
+    algalLegendDict={'Algal Negative':'00D','Algal Positive':'D00'}
+    Map.addTimeLapse(ab.select([0]),{'min':1,'max':2,'palette':'00D,D00','classLegendDict':algalLegendDict,'dateFormat':'YYMMdd','advanceInterval':'day'},'AB Classified')
+
+    def getStats(name_ending):
+        stats_files = glob.glob(os.path.join(output_dir,name_ending))
+        stats = []
+        for f in stats_files:
+            o = open(f,'r')
+            l = [int(n) for n in o.read().split(',')]
+            stats.append(l)
+            o.close()
+        stats = np.array(stats)
+        return np.mean(stats,0)
+    
+    count_stats = getStats('Algal_Count*')
+    Map.addTimeLapse(ab.select([1]),{'min':count_stats[0],'max':count_stats[1],'palette':'00D,D00','dateFormat':'YYMMdd','advanceInterval':'day'},'Cyanobacteria Count (cells/mL)')
+
+    biovolume_stats = getStats('Algal_Biovolume*')
+    Map.addTimeLapse(ab.select([2]),{'min':biovolume_stats[0],'max':biovolume_stats[1],'palette':'00D,D00','dateFormat':'YYMMdd','advanceInterval':'day'},'Cyanobacteria Biovolume (um3)')
+    
+####################################################################################################
