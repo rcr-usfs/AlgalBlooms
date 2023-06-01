@@ -18,13 +18,27 @@
 # python -m pip install geeViz
 # Also requires numpy, and pandas
 ####################################################################################################
-import os,sys,threading,json,pandas,time,glob
+import os,sys,threading,json,pandas,time,glob,datetime
 import geeViz.getImagesLib as getImagesLib
 import geeViz.assetManagerLib as aml
 import geeViz.taskManagerLib as tml
 import numpy as np
 ee = getImagesLib.ee
 Map = getImagesLib.Map
+####################################################################################################
+# Function to check for the date of the most recent Sentinel 2 data
+def getMostRecentS2Date():
+    today = ee.Date(datetime.datetime.today())
+    s2s = getImagesLib.getS2(ee.Geometry.Point([-111,41]),
+            today.advance(-25,'day'),
+            today.advance(2,'day'),
+            1,
+            365,
+            resampleMethod = 'near',
+            toaOrSR = 'TOA',
+            convertToDailyMosaics = False,
+            addCloudProbability = False).sort('system:time_start',False)
+    return  int(s2s.first().date().format('DDD').getInfo())
 ####################################################################################################
 # Function to convert a Pandas dataframe to geojson
 # Function taken from: https://notebook.community/captainsafia/nteract/applications/desktop/example-notebooks/pandas-to-geojson
@@ -264,6 +278,10 @@ def prepareCleanTrainingData(clean_points,clean_startYear = 2018,clean_endYear =
     # Add the composite to the map
     Map.addLayer(water_comp.reproject(crs,transform),getImagesLib.vizParamsFalse,'Clean Comp {}-{}'.format(clean_startYear,clean_endYear),False)
     Map.addLayer(water.reproject(crs,transform),{'palette':'00F','classLegendDict':{'Water':'00F'}},'Clean Water Mask {}-{}'.format(clean_startYear,clean_endYear),False)
+
+    oldWaterMask = getImagesLib.simpleWaterMask(water_comp).selfMask()
+                                                
+    Map.addLayer(oldWaterMask,{'palette':'0FF','classLegendDict':{'Water':'0FF'}},'Old Water Mask',False)
 
     # Get the ids of each point to then extract
     ids  = clean_points.aggregate_histogram('system:index').keys().getInfo()
@@ -644,10 +662,11 @@ lat='Sampling Latitude', lon='Sampling Longitude',dateProp = 'Sample Date',prope
     rf_hab,rf_cells,rf_vol,class_names,class_numbers = getAlgalModels(output_dir,pred_bands,nTrees,getError)
 
     # Apply algal models
-    for applyYear in applyYears:
-        for applyStartJulian in applyStartJulians:
-            applyEndJulian = applyStartJulian+applyNDayWindow
-            applyAlgalModels(rf_hab,rf_cells,rf_vol,water_model,class_names,class_numbers,applyStudyArea,applyYear,applyStartJulian, applyEndJulian,pred_bands,water_pred_bands,crs,transform,output_dir,export_outputs,output_asset_collection,studyAreaName)
+    if export_outputs:
+        for applyYear in applyYears:
+            for applyStartJulian in applyStartJulians:
+                applyEndJulian = applyStartJulian+applyNDayWindow
+                applyAlgalModels(rf_hab,rf_cells,rf_vol,water_model,class_names,class_numbers,applyStudyArea,applyYear,applyStartJulian, applyEndJulian,pred_bands,water_pred_bands,crs,transform,output_dir,export_outputs,output_asset_collection,studyAreaName)
 ####################################################################################################
 # Function to view outputs (this function is deprecated by the Bloom-Mapper)
 # Dev: https://dev.wrk.fs.usda.gov/forest-atlas/lcms-viewer/bloom-mapper.html 
