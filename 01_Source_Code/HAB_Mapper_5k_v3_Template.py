@@ -19,6 +19,7 @@
 # python -m pip install geeViz
 # Also requires numpy and pandas
 from HAB_Mapper_5k_v3_Lib import *
+Map.port=1233
 ####################################################################################################
 ####################################################################################################
 # Params
@@ -30,6 +31,9 @@ water_training_points = r"Q:\Algal_detection_GEE_work\Supervised_Method\Training
 # HCB Data
 # Accessed at: https://app.smartsheet.com/sheets/PjFmf547rwChWWwPGx4jfFhwmrgjq8Jp46ccHW61
 hcb_data = r"Q:\Algal_detection_GEE_work\Supervised_Method\Training_Data\HCB Data Sharing.xlsx"
+
+# WDEQ Data
+wdeq_data = r"Q:\Algal_detection_GEE_work\Supervised_Method\Training_Data\WDEQ_Lake_Phytoplankton_Data_2002-2021.xlsx"
 
 # Centroids of clean water bodies
 clean_points = r"Q:\Algal_detection_GEE_work\Supervised_Method\Training_Data\HABControlPoints\HABControlPoints.geojson"
@@ -46,12 +50,21 @@ clean_nSamples = 150
 
 # HCB spreadsheet params
 # Field names for coordinates and dates
-lat='Sampling Latitude'
-lon='Sampling Longitude'
-dateProp = 'Sample Date'
+hcb_lat='Sampling Latitude'
+hcb_lon='Sampling Longitude'
+hcb_dateProp = 'Sample Date'
+
+# WDEQ spreadsheet params
+# Field names for coordinates and dates
+wdeq_lat='Lat_Dec'
+wdeq_lon='Long_Dec'
+wdeq_dateProp = 'CollDate'
 
 # Properties to keep from the HCB table in the GEE featureCollection
-properties=['Sample Date','Wind Conditions','Cloud Cover','Bloom Description','Bloom Type','Sample Collection Method','Cyanobacteria Count (cells/mL)','Cyanobacteria Biovolume (um^3)']
+hcb_properties=['Sample Date','Wind Conditions','Cloud Cover','Bloom Description','Bloom Type','Sample Collection Method','Cyanobacteria Count (cells/mL)','Cyanobacteria Biovolume (um^3)']
+
+# Properties to keep from the WDEQ table in the GEE featureCollection
+wdeq_properties=['CollDate','Individuals (Raw Cnt)','Density (cells/L)','Class']#,'Genus/Species/Variety','Family','Genus','Class','Order','Division','CollMeth']
 
 # Bands to be used to train/apply the algal models
 pred_bands = ['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI','elevation']
@@ -75,22 +88,30 @@ output_dir = r'Q:\Algal_detection_GEE_work\Supervised_Method\Outputs'
 
 # Applying model and exporting to asset info
 # GEE image collection to export to
-export_outputs=True
+export_outputs=False
 output_asset_collection = 'projects/gtac-algal-blooms/assets/outputs/HAB-RF-Images'
 
 # What years to apply the model to
-applyYears = [int(ee.Date(datetime.datetime.today()).format('YYYY').getInfo())]#[2020,2021,2022]
+applyYears = [2022]#[int(ee.Date(datetime.datetime.today()).format('YYYY').getInfo())]#[2020,2021,2022]
 
 # Automatically find the dates that can be run
 mostRecentS2Date = getMostRecentS2Date()
 earliestJulian = 150
 applyFrequency = 14
 applyNDayWindow = 28
-applyStartJulians = list(range(earliestJulian,mostRecentS2Date-applyNDayWindow,applyFrequency))
+applyStartJulians = [210]#list(range(earliestJulian,mostRecentS2Date-applyNDayWindow,applyFrequency))
 
+# Which models to apply
+apply_HCB_Model=False
+apply_WDEQ_Model=True
+
+# Whether to extract points from a focal mean of a given radius kernel
+# Set to None if no focal mean should be computed
+hcb_focal_radius = 2.5
+wdeq_focal_radius = None
 
 # Give some unique study area name to the outputs
-studyAreaName='WY-MT-CO-UT-ID2'
+studyAreaName='GYE-WY'
 
 # Specify a study area to model across
 # Currently using the union of WY and the GYE
@@ -111,17 +132,19 @@ applyStudyAreaLarge = wy.geometry().union(gya,500)
 # Wrapper to run it all
 if __name__ == '__main__':
     Map.addLayer(applyStudyAreaLarge,{'layerType':'geeVectorImage','strokeColor':'F00'},'Bloom Mapper Study Area')
-    supervised_algal_mapper(water_training_points,hcb_data,clean_points,\
+    supervised_algal_mapper(water_training_points,hcb_data,wdeq_data,clean_points,\
     clean_startYear,clean_endYear,clean_startJulian,clean_endJulian,clean_nSamples,\
-    lat,lon,dateProp,properties,crs,transform,pred_bands,water_pred_bands,output_dir,nTrees,getError,applyStudyAreaLarge,applyYears,applyStartJulians,applyNDayWindow,export_outputs,output_asset_collection,studyAreaName)
+    hcb_lat,hcb_lon,hcb_dateProp,hcb_properties,\
+    wdeq_lat,wdeq_lon,wdeq_dateProp,wdeq_properties,\
+    crs,transform,pred_bands,water_pred_bands,output_dir,nTrees,getError,applyStudyAreaLarge,applyYears,applyStartJulians,applyNDayWindow,export_outputs,output_asset_collection,studyAreaName,hcb_focal_radius,wdeq_focal_radius,apply_HCB_Model,apply_WDEQ_Model)
 
-    tml.trackTasks2()
+    # tml.trackTasks2()
 #     # tml.batchCancel()
 #     # viewExportedOutputs(output_dir,output_asset_collection)
 # #####################################################
 # # Uncomment this out if map viewing is needed
-# Map.turnOnInspector()
-# Map.view()  
+Map.turnOnInspector()
+Map.view()  
 
 #####################################################
 

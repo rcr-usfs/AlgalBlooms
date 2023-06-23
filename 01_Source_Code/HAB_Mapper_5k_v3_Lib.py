@@ -22,9 +22,12 @@ import os,sys,threading,json,pandas,time,glob,datetime
 import geeViz.getImagesLib as getImagesLib
 import geeViz.assetManagerLib as aml
 import geeViz.taskManagerLib as tml
+import geeViz.gee2Pandas as g2p
+import geeViz.foliumView as fv
 import numpy as np
 ee = getImagesLib.ee
 Map = getImagesLib.Map
+# Map = fv.foliumMapper()
 ####################################################################################################
 # Function to check for the date of the most recent Sentinel 2 data
 def getMostRecentS2Date():
@@ -39,52 +42,6 @@ def getMostRecentS2Date():
             convertToDailyMosaics = False,
             addCloudProbability = False).sort('system:time_start',False)
     return  int(s2s.first().date().format('DDD').getInfo())
-####################################################################################################
-# Function to convert a Pandas dataframe to geojson
-# Function taken from: https://notebook.community/captainsafia/nteract/applications/desktop/example-notebooks/pandas-to-geojson
-def df_to_geojson(df, properties, lat='latitude', lon='longitude'):
-    # create a new python dict to contain our geojson data, using geojson format
-    geojson = {'type':'FeatureCollection', 'features':[]}
-
-    # loop through each row in the dataframe and convert each row to geojson format
-    for _, row in df.iterrows():
-      if not pandas.isnull(row[lon]) and not pandas.isnull(row[lat]):
-        # create a feature template to fill in
-        feature = {'type':'Feature',
-                    'properties':{},
-                    'geometry':{'type':'Point',
-                                'coordinates':[]}}
-
-        # fill in the coordinates
-        feature['geometry']['coordinates'] = [row[lon],row[lat]]
-
-        # for each column, get the value and add it as a new feature property
-        for prop in properties:
-          p = row[prop]
-          if pandas.isnull(p):p= 'NA'
-          feature['properties'][prop] = p
-        
-        # add this feature (aka, converted dataframe row) to the list of features inside our dict
-        
-        geojson['features'].append(feature)
-    
-    return geojson
-####################################################################################################
-# Function to take the Excel HCB spreadsheet and convert it to a GEE featureCollection
-def prepareTrainingData(hcb_data,lat='Sampling Latitude', lon='Sampling Longitude',properties=[]):
-    # Read in the Excel table as a Pandas dataframe
-    hcb_df = pandas.read_excel(hcb_data)
-
-    # Convert the time to a user-friendly format of yyyy-mm-DD
-    for c in hcb_df.columns[hcb_df.dtypes=='datetime64[ns]']:
-        hcb_df[c]= hcb_df[c].dt.strftime('%Y-%m-%d')
-
-    # Convert the dataframe to geojson
-    hfb_json = df_to_geojson(hcb_df, properties, lat, lon)
-
-    # Read in the geojson as a GEE featureCollection
-    hfb_json = ee.FeatureCollection(hfb_json)
-    return hfb_json
 ####################################################################################################
 # Function to save a Random Forest model from GEE
 def saveModel(rfModel,filename,delimiter='split_trees_here'):
@@ -269,7 +226,7 @@ def prepareCleanTrainingData(clean_points,clean_startYear = 2018,clean_endYear =
     clean_studyArea = clean_points.geometry().bounds(500,'EPSG:5070').buffer(2000)
 
     # Get the water mask and composite 
-    water_comp = applyWaterClassification(output_dir,water_model,clean_studyArea,clean_startYear,clean_endYear,clean_startJulian,clean_endJulian,crs,transform,water_pred_bands,addToMap=False,water_contract_pixels=3)
+    water_comp = applyWaterClassification(output_dir,water_model,clean_studyArea,clean_startYear,clean_endYear,clean_startJulian,clean_endJulian,crs,transform,water_pred_bands,addToMap=False,water_contract_pixels=2)
 
     # Extract the wtaer mask and mask out the composite to its extent
     water = water_comp.select(['Water']).selfMask()
@@ -317,10 +274,10 @@ def prepareCleanTrainingData(clean_points,clean_startYear = 2018,clean_endYear =
 ####################################################################################################
 # Function to extract the HCB predictor values for each unique sample collection date
 # Gets a composite for a +- 2 week window and extracts those values
-def extractHCBPredictorValues(hcb_fc,dateProp,crs,transform,pred_bands,water_pred_bands,water_model,d):
+def extractHCBPredictorValues(hcb_fc,dateProp,crs,transform,pred_bands,water_pred_bands,water_model,d,output_dir,focal_radius=None,weeks_before=2,weeks_after=2):
     # Get date window 
-    startDate = ee.Date(d).advance(-2,'week')
-    endDate = ee.Date(d).advance(2,'week')
+    startDate = ee.Date(d).advance(-weeks_before,'week')
+    endDate = ee.Date(d).advance(weeks_after,'week')
     startYear = int(startDate.get('year').getInfo())
     endYear = int(endDate.get('year').getInfo())
     startJulian = int(startDate.format('DDD').getInfo())
@@ -335,7 +292,9 @@ def extractHCBPredictorValues(hcb_fc,dateProp,crs,transform,pred_bands,water_pre
     compWater = water_comp.select(pred_bands).updateMask(water)
     
     # Extract the values for a 5x5 pixel window mean around the point (this is necessary since many samples are right on the shorline)
-    t = compWater.focalMean(2.5).reduceRegions(hcb_d, ee.Reducer.first(), None, crs, transform, 4)
+    if focal_radius != None:
+        compWater = compWater.focalMean(focal_radius)
+    t = compWater.reduceRegions(hcb_d, ee.Reducer.first(), None, crs, transform, 4)
     return t
 ####################################################################################################
 # Function to write out the predictor table from GEE to geojson
@@ -347,21 +306,27 @@ def writePredictorTables(featureCollection,filename):
 ####################################################################################################
 # Function to extract HCB samples by sets
 # Originally written to extract using multiple threads/processes, but that approach doesn't work. This now extracts by groups of samples
-def batchExtractHCBPredictorTables(hcb_fc,dateProp,crs,transform,pred_bands,water_pred_bands,output_dir,water_model):
+def batchExtractHCBPredictorTables(hcb_fc,dateProp,crs,transform,pred_bands,water_pred_bands,output_dir,water_model,nameStart='HCB',focal_radius=None):
     if not os.path.exists(output_dir):os.makedirs(output_dir)
+
+    # Filter training data dates to when Sentinel 2 is available (roughly 2017 although there are data for 2016 as well)
+    hcb_fc = hcb_fc.map(lambda f:f.set('system:time_start',ee.Date(f.get(dateProp)).millis()))
+    hcb_fc = hcb_fc.filterDate('2017-01-01','2200-01-01')
 
     # Get the dates and group them into 20 groups
     dates = hcb_fc.aggregate_histogram(dateProp).keys().getInfo()
+
     date_sets = new_set_maker(dates,20)
 
     # Iterate across each group and extract the predictor tables
     date_set_i = 1
     for date_set in date_sets:
-        of = os.path.join(output_dir,'HCB_Training_{}.geojson'.format(date_set_i))
+        of = os.path.join(output_dir,'{}_Training_{}_foc{}.geojson'.format(nameStart,date_set_i,focal_radius))
         if not os.path.exists(of):
+            print('Extracting dates:',date_set)
             out_f = []
             for d in date_set:
-                t = extractHCBPredictorValues(hcb_fc,dateProp,crs,transform,pred_bands,water_pred_bands,water_model,d)
+                t = extractHCBPredictorValues(hcb_fc,dateProp,crs,transform,pred_bands,water_pred_bands,water_model,d,output_dir,focal_radius)
                 out_f.append(t)
             out_f = ee.FeatureCollection(out_f).flatten()
             writePredictorTables(out_f,of)
@@ -471,7 +436,7 @@ def loadGeoJSON(files):
     return ee.FeatureCollection(out_fc).flatten()
 ####################################################################################################
 # Function to get the RF algal models
-def getAlgalModels(table_dir,pred_bands,nTrees=100,getError=False):
+def getAlgalModels(table_dir,pred_bands,nTrees=100,getError=False,hcb_focal_radius=2.5,wdeq_focal_radius=None,apply_HCB_Model=True,apply_WDEQ_Model=True):
 
     # Name of field for algal classes that must be added to the training data
     training_field = 'HAB'
@@ -481,46 +446,6 @@ def getAlgalModels(table_dir,pred_bands,nTrees=100,getError=False):
     count_model = os.path.join(table_dir,'Cell_Count_RF_Model.txt')
     biovolume_model = os.path.join(table_dir,'BioVolume_RF_Model.txt')
 
-    # Read in HCB and clean training geojson files as GEE featureCollections
-    hcb_training = glob.glob(os.path.join(table_dir,'HCB*.geojson'))
-    clean_training = glob.glob(os.path.join(table_dir,'Clean_*.geojson'))
-    hcb_training_fc = loadGeoJSON(hcb_training)
-    clean_training_fc = loadGeoJSON(clean_training)
-
-    # Set the clean training dependent variable fields to the respective clean values
-    # 1 for classification, and 0 for both regression variables (Count and Biovolume)
-    clean_training_fc = clean_training_fc.map(lambda f:ee.Feature(f).set(training_field,1))
-    clean_training_fc = clean_training_fc.map(lambda f:ee.Feature(f).set('Cyanobacteria Count (cells/mL)',0))
-    clean_training_fc = clean_training_fc.map(lambda f:ee.Feature(f).set('Cyanobacteria Biovolume (um^3)',0))
-    # print(clean_training_fc.first().toDictionary().keys().getInfo())
-    # print('N HCB Points:',hcb_training_fc.size().getInfo())
-    # print('N Clean Points:',clean_training_fc.size().getInfo())
-    # Cyanobacteria Count (cells/mL) > 25000 for threshold
-    # Cyanobacteria Biovolume (um^3)
-    # If failing bin taxa
-
-    # Filter out HCB data to ensure there are observations and the count is > the WY threshold of 25000
-    hcb_training_fc=hcb_training_fc.filter(ee.Filter.notNull(pred_bands))
-    hcb_training_fc=hcb_training_fc.filter(ee.Filter.notNull(['Cyanobacteria Count (cells/mL)']))
-    hcb_training_fc=hcb_training_fc.filter(ee.Filter.notNull(['Cyanobacteria Biovolume (um^3)']))
-    hcb_training_fc = hcb_training_fc.filter(ee.Filter.hasType('Cyanobacteria Count (cells/mL)','float'))
-    hcb_training_fc = hcb_training_fc.filter(ee.Filter.hasType('Cyanobacteria Biovolume (um^3)','float'))
-    hcb_training_fc = hcb_training_fc.filter(ee.Filter.gte('Cyanobacteria Count (cells/mL)',25000))
-
-    # Set the HCB training dependent variable field to the respective algal value
-    hcb_training_fc = hcb_training_fc.map(lambda f:ee.Feature(f).set(training_field,2))
-    
-    # Set up some class names and numbers for classification
-    class_names=['Not HAB','HAB']
-    class_numbers = [1,2]
-
-    Map.addLayer(hcb_training_fc.map(lambda f:ee.Feature(f).buffer(1500).bounds()),{'layerType':'geeVector','strokeColor':'F00'},'HCB Training')
-    Map.addLayer(clean_training_fc.map(lambda f:ee.Feature(f).buffer(15).bounds()),{'layerType':'geeVector'},'Clean Training')
-
-    # Combine the HCB and clean training data
-    training = hcb_training_fc.merge(clean_training_fc)
-    Map.addLayer(training.map(lambda f:ee.Feature(f).buffer(15).bounds()),{'layerType':'geeVector'},'All Training')
-    
     # Get the RF models for classification, count, and biovolume
     def getModel(training,training_field,outputMode):
         rf= ee.Classifier.smileRandomForest(nTrees)
@@ -528,26 +453,86 @@ def getAlgalModels(table_dir,pred_bands,nTrees=100,getError=False):
         rf=rf.train(training, training_field, pred_bands)
         return rf
 
-    rf_hab = getModel(training,training_field,'CLASSIFICATION')
-    rf_cells=getModel(training,'Cyanobacteria Count (cells/mL)','REGRESSION')
-    rf_vol=getModel(training,'Cyanobacteria Biovolume (um^3)','REGRESSION')
+    # Set up some class names and numbers for classification
+    class_names=['Not HAB','HAB']
+    class_numbers = [1,2]
 
-    # Save models (can only save classification model so all models are retrained each time currently)
-    saveModel(rf_hab,class_model)
-    # saveModel(rf_cells,count_model)
-    # saveModel(rf_vol,biovolume_model)
+    # Read in HCB and clean training geojson files as GEE featureCollections
+    if apply_HCB_Model:
+        hcb_training = glob.glob(os.path.join(table_dir,'HCB*_foc{}*.geojson'.format(hcb_focal_radius)))
+        clean_training = glob.glob(os.path.join(table_dir,'Clean_*.geojson'))
+        hcb_training_fc = loadGeoJSON(hcb_training)
+        clean_training_fc = loadGeoJSON(clean_training)
+        # Set the clean training dependent variable fields to the respective clean values
+        # 1 for classification, and 0 for both regression variables (Count and Biovolume)
+        clean_training_fc = clean_training_fc.map(lambda f:ee.Feature(f).set(training_field,1))
+        clean_training_fc = clean_training_fc.map(lambda f:ee.Feature(f).set('Cyanobacteria Count (cells/mL)',0))
+        clean_training_fc = clean_training_fc.map(lambda f:ee.Feature(f).set('Cyanobacteria Biovolume (um^3)',0))
+        # print(clean_training_fc.first().toDictionary().keys().getInfo())
+        # print('N HCB Points:',hcb_training_fc.size().getInfo())
+        # print('N Clean Points:',clean_training_fc.size().getInfo())
+        # Cyanobacteria Count (cells/mL) > 25000 for threshold
+        # Cyanobacteria Biovolume (um^3)
+        # If failing bin taxa
 
-    # Get error info
-    if getError:
-        getRFModelInfoClassification(rf_hab,'HAB_Classification',nTrees,class_names,table_dir)
-        getRFModelInfoRegression(rf_cells,'Cell_Count',nTrees,table_dir)
-        getRFModelInfoRegression(rf_vol,'Biovolume',nTrees,table_dir)
+        # Filter out HCB and WDEQ data to ensure there are observations and the count is > the WY threshold of 25000
+        hcb_training_fc=hcb_training_fc.filter(ee.Filter.notNull(pred_bands))
+        
+        hcb_training_fc=hcb_training_fc.filter(ee.Filter.notNull(['Cyanobacteria Count (cells/mL)']))
+        hcb_training_fc=hcb_training_fc.filter(ee.Filter.notNull(['Cyanobacteria Biovolume (um^3)']))
+        hcb_training_fc = hcb_training_fc.filter(ee.Filter.hasType('Cyanobacteria Count (cells/mL)','float'))
+        hcb_training_fc = hcb_training_fc.filter(ee.Filter.hasType('Cyanobacteria Biovolume (um^3)','float'))
+        hcb_training_fc = hcb_training_fc.filter(ee.Filter.gte('Cyanobacteria Count (cells/mL)',25000))
+        
+        # Set the HCB training dependent variable field to the respective algal value
+        hcb_training_fc = hcb_training_fc.map(lambda f:ee.Feature(f).set(training_field,2))
+
+        Map.addLayer(hcb_training_fc.map(lambda f:ee.Feature(f).buffer(15).bounds()),{'layerType':'geeVector','strokeColor':'F00'},'HCB Training')
+
+        
+        Map.addLayer(clean_training_fc.map(lambda f:ee.Feature(f).buffer(15).bounds()),{'layerType':'geeVector'},'Clean Training')
+
+         # Combine the HCB and clean training data
+        training = hcb_training_fc.merge(clean_training_fc)
+        Map.addLayer(training.map(lambda f:ee.Feature(f).buffer(15).bounds()),{'layerType':'geeVector'},'All Training')
+        
+        rf_hab = getModel(training,training_field,'CLASSIFICATION')
+        rf_cells=getModel(training,'Cyanobacteria Count (cells/mL)','REGRESSION')
+        rf_vol=getModel(training,'Cyanobacteria Biovolume (um^3)','REGRESSION')
+
+        # Save models (can only save classification model so all models are retrained each time currently)
+        saveModel(rf_hab,class_model)
+        # saveModel(rf_cells,count_model)
+        # saveModel(rf_vol,biovolume_model)
+        # Get error info
+        if getError:
+            getRFModelInfoClassification(rf_hab,'HAB_Classification',nTrees,class_names,table_dir)
+            getRFModelInfoRegression(rf_cells,'Cell_Count',nTrees,table_dir)
+            getRFModelInfoRegression(rf_vol,'Biovolume',nTrees,table_dir)
+    if apply_WDEQ_Model:
+        wdeq_training = glob.glob(os.path.join(table_dir,'WDEQ*_foc{}*.geojson'.format(wdeq_focal_radius)))
+        wdeq_training_fc = loadGeoJSON(wdeq_training)
     
-    # Return the models
-    return rf_hab,rf_cells,rf_vol,class_names,class_numbers
+        wdeq_training_fc=wdeq_training_fc.filter(ee.Filter.notNull(pred_bands))
+        # wdeq_training_fc  = wdeq_training_fc.filter(ee.Filter.eq('Class','Cyanophyceae'))
+        Map.addLayer(wdeq_training_fc.map(lambda f:ee.Feature(f).buffer(15).bounds()),{'layerType':'geeVector','strokeColor':'FF0'},'WDEQ Training')
+    
+        rf_wdeq_density=getModel(wdeq_training_fc,'Density (cells/L)','REGRESSION')
+        rf_wdeq_count=getModel(wdeq_training_fc,'Individuals (Raw Cnt)','REGRESSION')
+
+        # Get error info
+        if getError:
+            getRFModelInfoRegression(rf_wdeq_count,'WDEQ_Count',nTrees,table_dir)
+            getRFModelInfoRegression(rf_wdeq_density,'WDEQ_Density',nTrees,table_dir)
+    
+    # # Return the models
+    if not apply_WDEQ_Model:rf_wdeq_density,rf_wdeq_count=None,None
+    if not apply_HCB_Model:rf_hab,rf_cells,rf_vol=None,None,None
+
+    return rf_hab,rf_cells,rf_vol,rf_wdeq_density,rf_wdeq_count,class_names,class_numbers
 ####################################################################################################
 # Function to apply an algal model created in the functions above
-def applyAlgalModels(rf_hab,rf_cells,rf_vol,water_model,class_names,class_numbers,applyStudyArea,applyYear = 2022,applyStartJulian = 190, applyEndJulian = 210,pred_bands = ['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI','elevation'],water_pred_bands=['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI', 'elevation','slope', 'aspect',  'hillshade', 'tpi_29', 'tpi_59'],crs = getImagesLib.common_projections['NLCD_CONUS']['crs'],transform = [10,0,-2361915.0,0,-10,3177735.0],output_dir = r'Q:\Algal_detection_GEE_work\Supervised_Method\Outputs',export_outputs=False,output_asset_collection='projects/gtac-algal-blooms/assets/outputs/HAB-RF-Images',studyAreaName='WY'):
+def applyAlgalModels(rf_hab,rf_cells,rf_vol,rf_wdeq_density,rf_wdeq_count,water_model,class_names,class_numbers,applyStudyArea,applyYear = 2022,applyStartJulian = 190, applyEndJulian = 210,pred_bands = ['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI','elevation'],water_pred_bands=['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI', 'elevation','slope', 'aspect',  'hillshade', 'tpi_29', 'tpi_59'],crs = getImagesLib.common_projections['NLCD_CONUS']['crs'],transform = [10,0,-2361915.0,0,-10,3177735.0],output_dir = r'Q:\Algal_detection_GEE_work\Supervised_Method\Outputs',export_outputs=False,output_asset_collection='projects/gtac-algal-blooms/assets/outputs/HAB-RF-Images',studyAreaName='WY',apply_HCB_Model=True,apply_WDEQ_Model=True):
 
     # Get a common name ending for the dates provided
     applyStartDate = ee.Date.fromYMD(applyYear,1,1).advance(applyStartJulian,'day')
@@ -588,21 +573,40 @@ def applyAlgalModels(rf_hab,rf_cells,rf_vol,water_model,class_names,class_number
         stats = o.read().split(',')
         o.close()
         return [int(i) for i in stats]
+    
+    if apply_HCB_Model:
+        # Apply count regression model
+        cell_predicted = compWater.classify(rf_cells)
+        # cell_predicted_stats = getMapStretch(cell_predicted,'Count')
+        Map.addLayer(cell_predicted,{'min':1000000,'max':5000000,'palette':'00D,D00','layerType':'geeImage'},'Cyanobacteria Count  {}'.format(nameEnd),False)
 
-    # Apply count regression model
-    cell_predicted = compWater.classify(rf_cells)
-    # cell_predicted_stats = getMapStretch(cell_predicted,'Count')
-    # Map.addLayer(cell_predicted.reproject(crs,transform),{'min':1000000,'max':5000000,'palette':'00D,D00','layerType':'geeImage'},'Cyanobacteria Count (cells/mL) {}'.format(nameEnd),False)
+        # Apply biovolume regression model
+        biovolume_predicted = compWater.classify(rf_vol)
+        # biovolume_predicted_stats = getMapStretch(biovolume_predicted,'Biovolume')
+        Map.addLayer(biovolume_predicted,{'min':200000000,'max':1000000000,'palette':'00D,D00','layerType':'geeImage'},'Cyanobacteria Biovolume  {}'.format(nameEnd),False)
 
-    # Apply biovolume regression model
-    biovolume_predicted = compWater.classify(rf_vol)
-    # biovolume_predicted_stats = getMapStretch(biovolume_predicted,'Biovolume')
-    # Map.addLayer(biovolume_predicted.reproject(crs,transform),{'min':200000000,'max':1000000000,'palette':'00D,D00','layerType':'geeImage'},'Cyanobacteria Biovolume (um3) {}'.format(nameEnd),False)
+    if apply_WDEQ_Model:
+        # Apply WDEQ density regression model
+        wdeq_density_predicted = compWater.classify(rf_wdeq_density)
+        # wdeq_density_stats = getMapStretch(wdeq_density_predicted,'WDEQ_Density')
+        Map.addLayer(wdeq_density_predicted.divide(1000),{'min':0,'max':1000000000,'palette':'00D,D00','layerType':'geeImage'},'WDEQ Density  {}'.format(nameEnd),False)
 
+        # Apply WDEQ count regression model
+        wdeq_count_predicted = compWater.classify(rf_wdeq_count)
+        # wdeq_count_stats = getMapStretch(wdeq_count_predicted,'WDEQ_Count')
+        Map.addLayer(wdeq_count_predicted,{'min':0,'max':1000,'palette':'00D,D00','layerType':'geeImage'},'WDEQ Count {}'.format(nameEnd),False)
     if export_outputs:
         if not aml.ee_asset_exists(output_asset_collection + '/'+ outputAssetName):
             # Set up outputs for export
-            out_pred_stack = ee.Image.cat([cell_predicted.uint32(),biovolume_predicted.uint32()]).rename(['Count','Biovolume']).set({'system:time_start':applyStartDate.millis(),
+            out_pred_stack = []
+            out_pred_stack_names = []
+            if apply_HCB_Model:
+                out_pred_stack.extend([cell_predicted.uint32(),biovolume_predicted.uint32()])
+                out_pred_stack_names.extend(['HCB_Count','HCB_Biovolume'])
+            if apply_WDEQ_Model:
+                out_pred_stack.extend([wdeq_count_predicted.uint32(),wdeq_density_predicted.uint32()])
+                out_pred_stack_names.extend(['WDEQ_Count','WDEQ_Density'])
+            out_pred_stack = ee.Image.cat(out_pred_stack).rename(out_pred_stack_names).set({'system:time_start':applyStartDate.millis(),
                                         'system:time_end':applyEndDate.millis(),
                                         'year':applyYear,
                                         'startJulian':applyStartJulian,
@@ -612,7 +616,7 @@ def applyAlgalModels(rf_hab,rf_cells,rf_vol,water_model,class_names,class_number
             t = ee.batch.Export.image.toAsset(out_pred_stack.clip(applyStudyArea), 
                             description = outputAssetName, 
                             assetId = output_asset_collection + '/'+ outputAssetName, 
-                            pyramidingPolicy = {'AB':'mode','Count':'mean','Biovolume':'mean'}, 
+                            pyramidingPolicy = {'AB':'mode','HCB_Count':'mean','HCB_Count':'mean','WDEQ_Count':'mean','WDEQ_Density':'mean'}, 
                             dimensions = None, 
                             region = None, 
                             scale = None, 
@@ -643,30 +647,41 @@ def limitThreads(limit):
     print(threading.active_count(),'threads running')
 ####################################################################################################
 # Wrapper function for it all
-def supervised_algal_mapper(water_training_points,hcb_data,clean_points,\
+def supervised_algal_mapper(water_training_points,hcb_data,wdeq_data,clean_points,\
 clean_startYear = 2018,clean_endYear = 2022,clean_startJulian = 213,clean_endJulian = 229,clean_nSamples = 150,\
-lat='Sampling Latitude', lon='Sampling Longitude',dateProp = 'Sample Date',properties=[],crs = getImagesLib.common_projections['NLCD_CONUS']['crs'],transform = [10,0,-2361915.0,0,-10,3177735.0],pred_bands = ['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI','elevation'],water_pred_bands=['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI', 'elevation','slope', 'aspect',  'hillshade', 'tpi_29', 'tpi_59'],output_dir = r'Q:\Algal_detection_GEE_work\Supervised_Method\Outputs',nTrees=250,getError=False,applyStudyArea=None,applyYears = [2022],applyStartJulians = range(150,200,14),applyNDayWindow = 28,export_outputs=False,output_asset_collection='projects/gtac-algal-blooms/assets/outputs/HAB-RF-Images',studyAreaName='WY'):
+hcb_lat='Sampling Latitude', hcb_lon='Sampling Longitude',hcb_dateProp = 'Sample Date',hcb_properties=[],\
+    wdeq_lat='Sampling Latitude', wdeq_lon='Sampling Longitude',wdeq_dateProp = 'Sample Date',wdeq_properties=[],\
+        crs = getImagesLib.common_projections['NLCD_CONUS']['crs'],transform = [10,0,-2361915.0,0,-10,3177735.0],pred_bands = ['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI','elevation'],water_pred_bands=['blue', 'green', 'red', 're1', 're2', 're3', 'nir', 'nir2', 'waterVapor', 'cirrus', 'swir1', 'swir2', 'NDVI', 'NBR', 'NDMI', 'NDSI', 'brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth', 'tcAngleBG', 'NDCI', 'tcAngleGW', 'tcAngleBW', 'tcDistBG', 'tcDistGW', 'tcDistBW', 'bloom2', 'NDGI', 'elevation','slope', 'aspect',  'hillshade', 'tpi_29', 'tpi_59'],output_dir = r'Q:\Algal_detection_GEE_work\Supervised_Method\Outputs',nTrees=250,getError=False,applyStudyArea=None,applyYears = [2022],applyStartJulians = range(150,200,14),applyNDayWindow = 28,export_outputs=False,output_asset_collection='projects/gtac-algal-blooms/assets/outputs/HAB-RF-Images',studyAreaName='WY',hcb_focal_radius = 2.5,wdeq_focal_radius=None,apply_HCB_Model=True,apply_WDEQ_Model=True):
 
     # Get the water RF model
     water_model = getSupervisedWaterModel(water_training_points,water_startYear=clean_startYear,water_endYear=clean_endYear,water_startJulian=clean_startJulian,water_endJulian=clean_endJulian,crs = crs,transform = transform,pred_bands=water_pred_bands,output_dir =output_dir,nTrees=nTrees)
     # applyWaterClassification(output_dir,water_model,applyStudyArea,clean_startYear,clean_endYear,clean_startJulian,clean_endJulian,crs,transform,water_pred_bands,addToMap=True)
-  
-    # Get clean training data
-    prepareCleanTrainingData(clean_points,clean_startYear,clean_endYear,clean_startJulian,clean_endJulian,clean_nSamples,crs,transform ,pred_bands,water_pred_bands,output_dir,water_model)
+    
+    if apply_HCB_Model:
+        # Get clean training data
+        prepareCleanTrainingData(clean_points,clean_startYear,clean_endYear,clean_startJulian,clean_endJulian,clean_nSamples,crs,transform ,pred_bands,water_pred_bands,output_dir,water_model)
 
-    # Get HCB training data
-    hcb_fc = prepareTrainingData(hcb_data,lat,lon,properties)
-    batchExtractHCBPredictorTables(hcb_fc,dateProp,crs,transform,pred_bands,water_pred_bands,output_dir,water_model)
+        # Get HCB and WDEQ training data
+        hcb_fc =  g2p.tableToFeatureCollection(hcb_data,hcb_lat,hcb_lon,hcb_properties) 
+
+        batchExtractHCBPredictorTables(hcb_fc,hcb_dateProp,crs,transform,pred_bands,water_pred_bands,output_dir,water_model,'HCB',hcb_focal_radius)
+
+    if apply_WDEQ_Model:
+        wdeq_fc = g2p.tableToFeatureCollection(wdeq_data,wdeq_lat,wdeq_lon,wdeq_properties,wdeq_dateProp,[wdeq_lat,wdeq_lon,wdeq_dateProp,'Class'])
+        wdeq_fc  = wdeq_fc.filter(ee.Filter.eq('Class','Cyanophyceae'))
+        batchExtractHCBPredictorTables(wdeq_fc,wdeq_dateProp,crs,transform,pred_bands,water_pred_bands,output_dir,water_model,'WDEQ',wdeq_focal_radius)
+    
+    
 
     # Get algal RF models
-    rf_hab,rf_cells,rf_vol,class_names,class_numbers = getAlgalModels(output_dir,pred_bands,nTrees,getError)
+    rf_hab,rf_cells,rf_vol,rf_wdeq_density,rf_wdeq_count,class_names,class_numbers = getAlgalModels(output_dir,pred_bands,nTrees,getError,hcb_focal_radius,wdeq_focal_radius,apply_HCB_Model,apply_WDEQ_Model)
 
     # Apply algal models
-    if export_outputs:
-        for applyYear in applyYears:
-            for applyStartJulian in applyStartJulians:
-                applyEndJulian = applyStartJulian+applyNDayWindow
-                applyAlgalModels(rf_hab,rf_cells,rf_vol,water_model,class_names,class_numbers,applyStudyArea,applyYear,applyStartJulian, applyEndJulian,pred_bands,water_pred_bands,crs,transform,output_dir,export_outputs,output_asset_collection,studyAreaName)
+    # if export_outputs:
+    for applyYear in applyYears:
+        for applyStartJulian in applyStartJulians:
+            applyEndJulian = applyStartJulian+applyNDayWindow
+            applyAlgalModels(rf_hab,rf_cells,rf_vol,rf_wdeq_density,rf_wdeq_count,water_model,class_names,class_numbers,applyStudyArea,applyYear,applyStartJulian, applyEndJulian,pred_bands,water_pred_bands,crs,transform,output_dir,export_outputs,output_asset_collection,studyAreaName,apply_HCB_Model,apply_WDEQ_Model)
 ####################################################################################################
 # Function to view outputs (this function is deprecated by the Bloom-Mapper)
 # Dev: https://dev.wrk.fs.usda.gov/forest-atlas/lcms-viewer/bloom-mapper.html 
